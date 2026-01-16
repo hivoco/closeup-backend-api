@@ -1,0 +1,10 @@
+fastapi
+uvicorn
+sqlalchemy
+pydantic
+pydantic-settings
+redis
+cryptography
+httpx
+boto3
+python-multipart

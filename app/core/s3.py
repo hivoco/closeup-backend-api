@@ -1,0 +1,29 @@
+import boto3
+from app.core.config import settings
+
+s3_client = boto3.client(
+    "s3",
+    region_name=settings.AWS_REGION,
+    aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
+    aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
+)
+
+def upload_fileobj_to_s3(fileobj, key: str, content_type: str) -> str:
+    """
+    Uploads a file-like object to S3 and returns an HTTPS URL.
+    """
+    try:
+        s3_client.upload_fileobj(
+            Fileobj=fileobj,
+            Bucket=settings.AWS_S3_BUCKET,
+            Key=key,
+            ExtraArgs={
+                "ContentType": content_type,
+            },
+        )
+
+        # Standard S3 URL (works if object is public OR you serve via CloudFront)
+        return f"https://{settings.AWS_S3_BUCKET}.s3.{settings.AWS_REGION}.amazonaws.com/{key}"
+    except Exception as e:
+        print(f"❌ S3 Upload Error: {str(e)}")
+        raise

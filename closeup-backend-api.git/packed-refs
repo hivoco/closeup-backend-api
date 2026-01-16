@@ -1,0 +1,3 @@
+# pack-refs with: peeled fully-peeled sorted 
+e2c81bbda37d02f2d5499a27842b4d19783aacdb refs/heads/backup-before-cleanup
+e2c81bbda37d02f2d5499a27842b4d19783aacdb refs/heads/main
