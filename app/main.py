@@ -34,19 +34,19 @@ async def lifespan(_app: FastAPI):
 app = FastAPI(title="Closeup API", lifespan=lifespan)
 
 # Configure CORS
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",
-        "http://localhost:8110",
-        "http://127.0.0.1:3000",
-        "http://127.0.0.1:8110",
-        "http://192.168.0.6:3000",  # Local network access
-    ],
-    allow_credentials=True,
-    allow_methods=["*"],  # Allows all methods (GET, POST, PUT, DELETE, etc.)
-    allow_headers=["*"],  # Allows all headers
-)
+# app.add_middleware(
+#     CORSMiddleware,
+#     allow_origins=[
+#         "http://localhost:3000",
+#         "http://localhost:8110",
+#         "http://127.0.0.1:3000",
+#         "http://127.0.0.1:8110",
+#         "http://192.168.0.6:3000",  # Local network access
+#     ],
+#     allow_credentials=True,
+#     allow_methods=["*"],  # Allows all methods (GET, POST, PUT, DELETE, etc.)
+#     allow_headers=["*"],  # Allows all headers
+# )
 
 app.include_router(video.router)
 app.include_router(auth.router)
