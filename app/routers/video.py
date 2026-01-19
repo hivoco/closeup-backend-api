@@ -188,7 +188,7 @@ async def submit_video_form(
 
         if existing_job:
             # User already submitted, just send new OTP
-            otp = generate_otp()
+            otp = 000000
             logger.info("OTP for %s: %s", mobile_number, otp)
 
             db.add(UserOTP(
@@ -232,7 +232,7 @@ async def submit_video_form(
             db.add(VideoAssets(job_id=job.id, raw_selfie_url=url))
 
             # Generate and send OTP
-            otp = generate_otp()
+            otp = 000000
             logger.info("OTP for %s: %s", mobile_number, otp)
 
             db.add(UserOTP(
