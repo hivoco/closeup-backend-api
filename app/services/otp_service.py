@@ -45,7 +45,7 @@ class OTPService:
             raise ValueError(f"OTP already sent. Please wait {ttl} seconds before requesting a new one.")
 
         # Generate new OTP
-        otp = 000000
+        otp ="000000"
         otp_hash = hash_otp(otp)
 
         # Calculate expiry

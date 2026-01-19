@@ -200,7 +200,7 @@ def resend_otp(payload: dict, db: Session = Depends(get_db)):
         )
 
     # Generate new OTP
-    otp = 000000
+    otp ="000000"
     logger.info("RESEND OTP for %s: %s", mobile_number, otp)
 
     # Save OTP to database
