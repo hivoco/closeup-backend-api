@@ -100,7 +100,7 @@ async def submit_video_form(
             detail=f"Invalid attribute_love. Must be one of: {', '.join(valid_attribute_love)}"
         )
 
-    valid_relationship_status = {"Married", "Situationship", "Nanaship", "Crushing", "Long-Distance", "Dating"}
+    valid_relationship_status = {"Married", "Situationship", "Nanoship", "Crushing", "Long-Distance", "Dating"}
     if relationship_status not in valid_relationship_status:
         raise HTTPException(
             status_code=400,

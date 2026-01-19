@@ -14,7 +14,7 @@ class VideoJob(Base):
         "Sense of Humor","Heart"
     ))
     relationship_status = Column(Enum(
-        "Married","Situationship","Nanaship",
+        "Married","Situationship","Nanoship",
         "Crushing","Long-Distance","Dating"
     ))
     vibe = Column(Enum(
