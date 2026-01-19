@@ -148,3 +148,86 @@ class RedisOps:
         if not client:
             return -1
         return client.ttl(key)
+
+
+class RateLimiter:
+    """Rate limiting using Redis"""
+
+    @staticmethod
+    def check_rate_limit(
+        identifier: str,
+        action: str,
+        max_requests: int,
+        window_seconds: int
+    ) -> tuple[bool, int]:
+        """
+        Check if request is within rate limit.
+
+        Returns:
+            (is_allowed, remaining_requests)
+            - is_allowed: True if request should be allowed
+            - remaining_requests: How many requests left in window
+        """
+        if not RedisClient.is_available():
+            # If Redis not available, allow request (fallback)
+            return True, max_requests
+
+        key = CacheKeys.rate_limit(identifier, action)
+
+        try:
+            current = RedisOps.incr(key)
+
+            # Set expiry on first request
+            if current == 1:
+                RedisOps.expire(key, window_seconds)
+
+            remaining = max(0, max_requests - current)
+            is_allowed = current <= max_requests
+
+            return is_allowed, remaining
+        except Exception:
+            # On error, allow request
+            return True, max_requests
+
+    @staticmethod
+    def get_remaining_time(identifier: str, action: str) -> int:
+        """Get seconds until rate limit resets"""
+        key = CacheKeys.rate_limit(identifier, action)
+        return max(0, RedisOps.ttl(key))
+
+
+class Cache:
+    """Caching helpers"""
+
+    @staticmethod
+    def get_pending_video(user_id: str) -> Optional[str]:
+        """Get cached pending video job_id for user"""
+        return RedisOps.get(CacheKeys.pending_video(user_id))
+
+    @staticmethod
+    def set_pending_video(user_id: str, job_id: str, ttl: int = 600) -> bool:
+        """Cache pending video job_id (default 10 min)"""
+        return RedisOps.set_with_expiry(
+            CacheKeys.pending_video(user_id),
+            job_id,
+            ttl
+        )
+
+    @staticmethod
+    def clear_pending_video(user_id: str) -> int:
+        """Clear pending video cache when job completes"""
+        return RedisOps.delete(CacheKeys.pending_video(user_id))
+
+    @staticmethod
+    def get_user_verification(user_id: str) -> Optional[str]:
+        """Get cached verification status"""
+        return RedisOps.get(CacheKeys.user_verification(user_id))
+
+    @staticmethod
+    def set_user_verification(user_id: str, is_verified: bool, ttl: int = 3600) -> bool:
+        """Cache user verification status (default 1 hour)"""
+        return RedisOps.set_with_expiry(
+            CacheKeys.user_verification(user_id),
+            "1" if is_verified else "0",
+            ttl
+        )

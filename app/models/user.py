@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, Text, Integer, DateTime
+from sqlalchemy import Column, String, Text, Integer, DateTime, Boolean
 from app.core.database import Base
 from app.core.timezone import get_ist_now
 
@@ -9,5 +9,6 @@ class User(Base):
     phone_encrypted = Column(Text, nullable=False)
     phone_hash = Column(String(64), nullable=False, unique=True)
     video_count = Column(Integer, default=0)
+    terms_accepted = Column(Boolean, default=False, nullable=False)
     created_at = Column(DateTime, default=get_ist_now, nullable=False)
     updated_at = Column(DateTime, default=get_ist_now, onupdate=get_ist_now, nullable=False)

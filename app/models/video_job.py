@@ -18,11 +18,11 @@ class VideoJob(Base):
         "Crushing","Long-Distance","Dating"
     ))
     vibe = Column(Enum(
-        "rap","rock","pop"
+        "rap","rock","romantic"
     ))
 
     status = Column(Enum(
-        "queued","photo_processing","photo_done",
+        "wait","queued","photo_processing","photo_done",
         "lipsync_processing","lipsync_done",
         "stitching","uploaded","sent","failed"
     ), default="queued")

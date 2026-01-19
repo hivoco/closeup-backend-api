@@ -10,6 +10,7 @@ from app.core.security import hash_phone
 from app.core.otp import generate_otp, hash_otp, send_otp
 from app.core.timezone import get_ist_now
 from app.core.config import settings
+from app.core.redis import RateLimiter, Cache
 
 from app.models.user import User
 from app.models.user_otp import UserOTP
@@ -31,7 +32,25 @@ def verify_otp(payload: dict, db: Session = Depends(get_db)):
             detail="Missing required fields: mobile_number and otp"
         )
 
-    phone_hash = hash_phone(payload["mobile_number"])
+    mobile_number = payload["mobile_number"]
+
+    # Rate limit: max 10 OTP verification attempts per 5 minutes
+    is_allowed, _ = RateLimiter.check_rate_limit(
+        identifier=mobile_number,
+        action="verify_otp",
+        max_requests=10,
+        window_seconds=300
+    )
+
+    if not is_allowed:
+        retry_after = RateLimiter.get_remaining_time(mobile_number, "verify_otp")
+        raise HTTPException(
+            status_code=429,
+            detail=f"Too many verification attempts. Please try again in {retry_after} seconds.",
+            headers={"Retry-After": str(retry_after)}
+        )
+
+    phone_hash = hash_phone(mobile_number)
     otp_input = payload["otp"]
 
     user = db.query(User).filter(User.phone_hash == phone_hash).first()
@@ -79,20 +98,29 @@ def verify_otp(payload: dict, db: Session = Depends(get_db)):
     verification.verified_at = get_ist_now()
     verification.verification_method = "otp"
 
-    # Check if user has a pending video job
-    pending_job = db.query(VideoJob).filter(
+    # Check if user has a waiting video job (status = "wait")
+    # Change status from "wait" to "queued" after verification
+    waiting_job = db.query(VideoJob).filter(
         VideoJob.user_id == user.id,
-        VideoJob.status == "queued"
+        VideoJob.status == "wait"
     ).first()
 
-    if pending_job:
-        # Increment video count for the pending job
+    if waiting_job:
+        # Change status from "wait" to "queued" - now the job can be processed
+        waiting_job.status = "queued"
+        waiting_job.updated_at = get_ist_now()
         user.video_count += 1
         db.commit()
+
+        # Cache the pending video job
+        Cache.set_pending_video(user.id, str(waiting_job.id))
+
+        print(f"✅ Job {waiting_job.id} status changed: wait → queued")
+
         return {
             "status": "verified",
-            "job_id": pending_job.id,
-            "message": "OTP verified successfully. Your video is being processed."
+            "job_id": waiting_job.id,
+            "message": "OTP verified successfully. Your video is now queued for processing."
         }
 
     db.commit()
@@ -116,6 +144,23 @@ def resend_otp(payload: dict, db: Session = Depends(get_db)):
         )
 
     mobile_number = payload["mobile_number"]
+
+    # Rate limit: max 3 resend requests per 10 minutes
+    is_allowed, _ = RateLimiter.check_rate_limit(
+        identifier=mobile_number,
+        action="resend_otp",
+        max_requests=3,
+        window_seconds=600  # 10 minutes
+    )
+
+    if not is_allowed:
+        retry_after = RateLimiter.get_remaining_time(mobile_number, "resend_otp")
+        raise HTTPException(
+            status_code=429,
+            detail=f"Too many OTP requests. Please try again in {retry_after} seconds.",
+            headers={"Retry-After": str(retry_after)}
+        )
+
     phone_hash = hash_phone(mobile_number)
 
     # Find user

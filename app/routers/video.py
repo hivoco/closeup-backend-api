@@ -12,6 +12,7 @@ from app.core.otp import generate_otp, hash_otp, send_otp
 from app.core.config import settings
 from app.core.s3 import upload_fileobj_to_s3
 from app.core.timezone import get_ist_now
+from app.core.redis import RateLimiter, Cache
 
 from app.models.user import User
 from app.models.user_verification import UserVerification
@@ -32,9 +33,26 @@ async def submit_video_form(
     relationship_status: str = Form(...),
     attribute_love: str = Form(...),
     vibe: str = Form(...),
+    terms_accepted: bool = Form(...),
     photo: UploadFile = File(...),
     db: Session = Depends(get_db),
 ):
+    # Rate limit by phone number: max 5 requests per 5 minutes
+    is_allowed, _ = RateLimiter.check_rate_limit(
+        identifier=mobile_number.strip(),
+        action="video_submit",
+        max_requests=5,
+        window_seconds=300  # 5 minutes
+    )
+
+    if not is_allowed:
+        retry_after = RateLimiter.get_remaining_time(mobile_number.strip(), "video_submit")
+        raise HTTPException(
+            status_code=429,
+            detail=f"Too many requests. Please try again in {retry_after} seconds.",
+            headers={"Retry-After": str(retry_after)}
+        )
+
     # Validate mobile number
     if not mobile_number or len(mobile_number.strip()) < 10:
         raise HTTPException(
@@ -89,11 +107,18 @@ async def submit_video_form(
             detail=f"Invalid relationship_status. Must be one of: {', '.join(valid_relationship_status)}"
         )
 
-    valid_vibes = {"rap", "rock", "pop"}
+    valid_vibes = {"romantic", "rock", "rap"}
     if vibe not in valid_vibes:
         raise HTTPException(
             status_code=400,
             detail=f"Invalid vibe. Must be one of: {', '.join(valid_vibes)}"
+        )
+
+    # Validate terms_accepted
+    if not terms_accepted:
+        raise HTTPException(
+            status_code=400,
+            detail="You must accept the terms and conditions to continue."
         )
 
     # Validate photo
@@ -127,8 +152,12 @@ async def submit_video_form(
             phone_hash=phone_hash,
             phone_encrypted=encrypt_phone(mobile_number),
             video_count=0,
+            terms_accepted=terms_accepted,
         )
         db.add(user)
+    elif not user.terms_accepted and terms_accepted:
+        # Update terms_accepted if user exists but hadn't accepted before
+        user.terms_accepted = True
         db.flush()
 
         db.add(UserVerification(
@@ -151,10 +180,10 @@ async def submit_video_form(
         db.flush()
 
     if not verification.is_verified:
-        # Check if user already has a pending job (not verified yet)
+        # Check if user already has a waiting job (not verified yet)
         existing_job = db.query(VideoJob).filter(
             VideoJob.user_id == user.id,
-            VideoJob.status == "queued"
+            VideoJob.status == "wait"  # Check for "wait" status, not "queued"
         ).first()
 
         if existing_job:
@@ -180,6 +209,7 @@ async def submit_video_form(
             }
 
         # Create the video job and upload photo for first time submission
+        # Status is "wait" until user verifies OTP, then it becomes "queued"
         try:
             job = VideoJob(
                 user_id=user.id,
@@ -187,7 +217,7 @@ async def submit_video_form(
                 relationship_status=relationship_status,
                 attribute_love=attribute_love,
                 vibe=vibe,
-                status="queued",
+                status="wait",  # Will change to "queued" after OTP verification
             )
             db.add(job)
             db.flush()
@@ -229,14 +259,24 @@ async def submit_video_form(
                 detail=f"Failed to process your request: {str(e)}"
             )
 
-    # User is verified - check if they already have a pending job
+    # User is verified - check cache first for pending job
+    cached_job_id = Cache.get_pending_video(user.id)
+    if cached_job_id:
+        return {
+            "status": "pending",
+            "job_id": int(cached_job_id),
+            "message": "Your previous video is still being processed. Please wait for it to complete before creating a new one."
+        }
+
+    # Cache miss - check database
     pending_job = db.query(VideoJob).filter(
         VideoJob.user_id == user.id,
-        VideoJob.status != "sent"
+        VideoJob.status.notin_(["sent", "failed"])
     ).first()
 
     if pending_job:
-        # Job already exists and counted, just return it
+        # Cache the pending job for future requests
+        Cache.set_pending_video(user.id, str(pending_job.id))
         return {
             "status": "pending",
             "job_id": pending_job.id,
@@ -266,6 +306,9 @@ async def submit_video_form(
         db.add(VideoAssets(job_id=job.id, raw_selfie_url=url))
         user.video_count += 1
         db.commit()
+
+        # Cache the new pending job
+        Cache.set_pending_video(user.id, str(job.id))
 
         return {
             "status": "video_created",

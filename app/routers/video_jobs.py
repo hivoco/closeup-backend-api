@@ -314,7 +314,7 @@ def update_job_status(
         )
 
     # Validate status
-    valid_statuses = ['queued', 'photo_processing', 'photo_done', 'lipsync_processing',
+    valid_statuses = ['wait', 'queued', 'photo_processing', 'photo_done', 'lipsync_processing',
                       'lipsync_done', 'stitching', 'uploaded', 'sent', 'failed']
 
     if status not in valid_statuses:
@@ -387,7 +387,7 @@ def update_job_by_job_id(
         )
 
     # Validate status
-    valid_statuses = ['queued', 'photo_processing', 'photo_done', 'lipsync_processing',
+    valid_statuses = ['wait', 'queued', 'photo_processing', 'photo_done', 'lipsync_processing',
                       'lipsync_done', 'stitching', 'uploaded', 'sent', 'failed']
 
     if status not in valid_statuses:
