@@ -1,4 +1,5 @@
 import redis
+from redis.connection import ConnectionPool
 from typing import Optional
 from app.core.config import settings
 
@@ -6,24 +7,29 @@ class RedisClient:
     """Redis client for caching and session management"""
 
     _client: Optional[redis.Redis] = None
+    _pool: Optional[ConnectionPool] = None
     _is_available: bool = False
 
     @classmethod
     def get_client(cls) -> Optional[redis.Redis]:
-        """Get or create Redis client instance"""
+        """Get or create Redis client instance with connection pooling"""
         if cls._client is None:
             try:
-                cls._client = redis.Redis(
+                # Use connection pool for better performance with AWS ElastiCache
+                cls._pool = ConnectionPool(
                     host=settings.REDIS_HOST,
                     port=settings.REDIS_PORT,
                     password=settings.REDIS_PASSWORD if settings.REDIS_PASSWORD else None,
                     db=settings.REDIS_DB,
-                    decode_responses=True,  # Automatically decode bytes to strings
-                    socket_connect_timeout=5,
-                    socket_timeout=5,
+                    decode_responses=True,
+                    socket_connect_timeout=2,  # Reduced from 5s
+                    socket_timeout=2,          # Reduced from 5s
                     retry_on_timeout=True,
-                    health_check_interval=30,
+                    max_connections=20,        # Connection pool size
+                    health_check_interval=15,  # More frequent health checks
                 )
+
+                cls._client = redis.Redis(connection_pool=cls._pool)
 
                 # Test connection
                 cls._client.ping()
@@ -32,6 +38,7 @@ class RedisClient:
             except Exception as e:
                 print(f"❌ Redis connection failed: {e}")
                 cls._client = None
+                cls._pool = None
                 cls._is_available = False
                 raise
 
@@ -48,7 +55,10 @@ class RedisClient:
         if cls._client:
             cls._client.close()
             cls._client = None
-            print("🔌 Redis connection closed")
+        if cls._pool:
+            cls._pool.disconnect()
+            cls._pool = None
+        print("🔌 Redis connection closed")
 
 
 def get_redis() -> Optional[redis.Redis]:
@@ -162,6 +172,7 @@ class RateLimiter:
     ) -> tuple[bool, int]:
         """
         Check if request is within rate limit.
+        Uses pipeline for single round-trip to Redis (optimized for AWS).
 
         Returns:
             (is_allowed, remaining_requests)
@@ -173,14 +184,19 @@ class RateLimiter:
             return True, max_requests
 
         key = CacheKeys.rate_limit(identifier, action)
+        client = get_redis()
+
+        if not client:
+            return True, max_requests
 
         try:
-            current = RedisOps.incr(key)
+            # Use pipeline for single round-trip (faster for AWS)
+            pipe = client.pipeline()
+            pipe.incr(key)
+            pipe.expire(key, window_seconds)
+            results = pipe.execute()
 
-            # Set expiry on first request
-            if current == 1:
-                RedisOps.expire(key, window_seconds)
-
+            current = results[0]  # Result of INCR
             remaining = max(0, max_requests - current)
             is_allowed = current <= max_requests
 
