@@ -1,6 +1,7 @@
 import redis
 from redis.connection import ConnectionPool
 from typing import Optional
+import json
 from app.core.config import settings
 
 class RedisClient:
@@ -211,6 +212,25 @@ class RateLimiter:
         key = CacheKeys.rate_limit(identifier, action)
         return max(0, RedisOps.ttl(key))
 
+    @staticmethod
+    def check_global_limit(
+        action: str,
+        max_requests: int = 1000,
+        window_seconds: int = 60
+    ) -> tuple[bool, int]:
+        """
+        Global rate limit for entire API (all users combined).
+        Use this to protect server from overload.
+
+        Example: max 1000 requests/minute for video_submit
+        """
+        return RateLimiter.check_rate_limit(
+            identifier="global",
+            action=action,
+            max_requests=max_requests,
+            window_seconds=window_seconds
+        )
+
 
 class Cache:
     """Caching helpers"""
@@ -247,3 +267,239 @@ class Cache:
             "1" if is_verified else "0",
             ttl
         )
+
+
+class GroqKeyManager:
+    """
+    Manages multiple Groq API keys with load balancing and automatic failover.
+
+    Features:
+    - Round-robin distribution across keys
+    - Per-key rate limiting (100 RPM each)
+    - Automatic failover when key hits limit
+    - 3x capacity with 3 keys (300 RPM total)
+    """
+
+    RPM_LIMIT_PER_KEY = 100  # Requests per minute per key
+    WINDOW_SECONDS = 60
+
+    @staticmethod
+    def _get_key_rate_limit_key(key_index: int) -> str:
+        """Redis key for tracking rate limit per API key"""
+        return f"groq:rate_limit:key_{key_index}"
+
+    @staticmethod
+    def _get_round_robin_key() -> str:
+        """Redis key for round-robin counter"""
+        return "groq:round_robin_counter"
+
+    @classmethod
+    def get_available_key(cls) -> Optional[tuple[str, int]]:
+        """
+        Get an available Groq API key using round-robin with failover.
+
+        Returns:
+            (api_key, key_index) if available, None if all keys exhausted
+        """
+        keys = settings.groq_api_keys_list
+        if not keys:
+            return None
+
+        num_keys = len(keys)
+        client = get_redis()
+
+        if not client:
+            # Redis unavailable, return first key
+            return keys[0], 0
+
+        try:
+            # Get current round-robin position
+            counter = client.incr(cls._get_round_robin_key())
+            client.expire(cls._get_round_robin_key(), 3600)  # Reset hourly
+
+            # Try each key starting from round-robin position
+            for i in range(num_keys):
+                key_index = (counter + i - 1) % num_keys
+                rate_key = cls._get_key_rate_limit_key(key_index)
+
+                # Check if this key has capacity
+                current = client.get(rate_key)
+                current_count = int(current) if current else 0
+
+                if current_count < cls.RPM_LIMIT_PER_KEY:
+                    # This key has capacity, increment and use it
+                    pipe = client.pipeline()
+                    pipe.incr(rate_key)
+                    pipe.expire(rate_key, cls.WINDOW_SECONDS)
+                    pipe.execute()
+
+                    print(f"🔑 Using Groq key #{key_index + 1} ({current_count + 1}/{cls.RPM_LIMIT_PER_KEY})")
+                    return keys[key_index], key_index
+
+            # All keys exhausted
+            print("⚠️ All Groq API keys at rate limit")
+            return None
+
+        except Exception as e:
+            print(f"❌ GroqKeyManager error: {e}")
+            return keys[0], 0  # Fallback to first key
+
+    @classmethod
+    def get_total_remaining(cls) -> int:
+        """Get total remaining requests across all keys"""
+        keys = settings.groq_api_keys_list
+        client = get_redis()
+
+        if not client:
+            return cls.RPM_LIMIT_PER_KEY * len(keys)
+
+        total_remaining = 0
+        try:
+            for i in range(len(keys)):
+                rate_key = cls._get_key_rate_limit_key(i)
+                current = client.get(rate_key)
+                current_count = int(current) if current else 0
+                total_remaining += max(0, cls.RPM_LIMIT_PER_KEY - current_count)
+        except Exception:
+            total_remaining = cls.RPM_LIMIT_PER_KEY * len(keys)
+
+        return total_remaining
+
+    @classmethod
+    def get_retry_after(cls) -> int:
+        """Get seconds until at least one key becomes available"""
+        keys = settings.groq_api_keys_list
+        client = get_redis()
+
+        if not client or not keys:
+            return 60
+
+        min_ttl = 60
+        try:
+            for i in range(len(keys)):
+                rate_key = cls._get_key_rate_limit_key(i)
+                ttl = client.ttl(rate_key)
+                if ttl > 0:
+                    min_ttl = min(min_ttl, ttl)
+        except Exception:
+            pass
+
+        return max(1, min_ttl)
+
+
+class PhotoValidationQueue:
+    """
+    Queue system for handling burst traffic in photo validation.
+
+    When all Groq API keys are exhausted, requests are queued
+    and processed when capacity becomes available.
+    """
+
+    QUEUE_KEY = "photo_validation:queue"
+    RESULT_PREFIX = "photo_validation:result:"
+    RESULT_TTL = 300  # 5 minutes
+    MAX_QUEUE_SIZE = 500  # Max queued requests
+
+    @classmethod
+    def enqueue(cls, validation_id: str, image_data: str) -> bool:
+        """
+        Add a photo validation request to the queue.
+
+        Args:
+            validation_id: Unique ID for this validation request
+            image_data: Base64 encoded image data URL
+
+        Returns:
+            True if queued successfully
+        """
+        client = get_redis()
+        if not client:
+            return False
+
+        try:
+            # Check queue size
+            queue_size = client.llen(cls.QUEUE_KEY)
+            if queue_size >= cls.MAX_QUEUE_SIZE:
+                print(f"⚠️ Queue full ({queue_size}/{cls.MAX_QUEUE_SIZE})")
+                return False
+
+            # Add to queue
+            item = json.dumps({
+                "validation_id": validation_id,
+                "image_data": image_data,
+                "queued_at": str(get_redis().time()[0])  # Unix timestamp
+            })
+            client.rpush(cls.QUEUE_KEY, item)
+
+            # Set initial status
+            cls.set_status(validation_id, "queued", position=queue_size + 1)
+
+            print(f"📥 Queued validation {validation_id} (position: {queue_size + 1})")
+            return True
+
+        except Exception as e:
+            print(f"❌ Queue error: {e}")
+            return False
+
+    @classmethod
+    def dequeue(cls) -> Optional[dict]:
+        """Get next item from queue"""
+        client = get_redis()
+        if not client:
+            return None
+
+        try:
+            item = client.lpop(cls.QUEUE_KEY)
+            if item:
+                return json.loads(item)
+            return None
+        except Exception:
+            return None
+
+    @classmethod
+    def set_status(cls, validation_id: str, status: str, **kwargs) -> bool:
+        """Set validation status with optional data"""
+        client = get_redis()
+        if not client:
+            return False
+
+        try:
+            data = {"status": status, **kwargs}
+            key = f"{cls.RESULT_PREFIX}{validation_id}"
+            client.setex(key, cls.RESULT_TTL, json.dumps(data))
+            return True
+        except Exception:
+            return False
+
+    @classmethod
+    def get_status(cls, validation_id: str) -> Optional[dict]:
+        """Get validation status and result"""
+        client = get_redis()
+        if not client:
+            return None
+
+        try:
+            key = f"{cls.RESULT_PREFIX}{validation_id}"
+            data = client.get(key)
+            if data:
+                return json.loads(data)
+            return None
+        except Exception:
+            return None
+
+    @classmethod
+    def set_result(cls, validation_id: str, result: dict) -> bool:
+        """Store validation result"""
+        return cls.set_status(validation_id, "completed", result=result)
+
+    @classmethod
+    def get_queue_size(cls) -> int:
+        """Get current queue size"""
+        client = get_redis()
+        if not client:
+            return 0
+
+        try:
+            return client.llen(cls.QUEUE_KEY)
+        except Exception:
+            return 0

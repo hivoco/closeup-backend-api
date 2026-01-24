@@ -37,6 +37,21 @@ async def submit_video_form(
     photo: UploadFile = File(...),
     db: Session = Depends(get_db),
 ):
+    # Global rate limit: max 500 requests/minute for entire API (all users)
+    # Protects server from overload during high traffic
+    is_allowed_global, _ = RateLimiter.check_global_limit(
+        action="video_submit_global",
+        max_requests=500,  # Adjust based on server capacity
+        window_seconds=60
+    )
+
+    if not is_allowed_global:
+        raise HTTPException(
+            status_code=503,
+            detail="Server is busy. Please try again in a few seconds.",
+            headers={"Retry-After": "5"}
+        )
+
     # Rate limit by phone number: max 5 requests per 5 minutes
     is_allowed, _ = RateLimiter.check_rate_limit(
         identifier=mobile_number.strip(),

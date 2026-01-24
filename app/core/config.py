@@ -12,7 +12,9 @@ class Settings(BaseSettings):
     AWS_ACCESS_KEY_ID: str
     AWS_SECRET_ACCESS_KEY: str
 
-    GROQ_API_KEY: str
+    # Groq API Keys (comma-separated for multiple keys)
+    # Example: "key1,key2,key3" for 3x capacity
+    GROQ_API_KEYS: str  # Primary + additional keys, comma-separated
 
     # Redis Configuration
     REDIS_HOST: str
@@ -22,5 +24,10 @@ class Settings(BaseSettings):
 
     class Config:
         env_file = ".env"
+
+    @property
+    def groq_api_keys_list(self) -> list[str]:
+        """Parse comma-separated Groq API keys into list"""
+        return [key.strip() for key in self.GROQ_API_KEYS.split(",") if key.strip()]
 
 settings = Settings()

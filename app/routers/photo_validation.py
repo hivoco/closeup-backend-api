@@ -2,53 +2,63 @@ from fastapi import APIRouter, File, UploadFile, HTTPException
 from typing import Optional, Literal
 import httpx
 import base64
+import io
+from uuid import uuid4
+from PIL import Image
 from pydantic import BaseModel
 from app.core.config import settings
+from app.core.redis import GroqKeyManager, PhotoValidationQueue
 
 router = APIRouter(prefix="/api/v1/photo-validation", tags=["photo-validation"])
 
+# Image resize settings for faster processing
+MAX_IMAGE_SIZE = 512  # Max width/height in pixels
+JPEG_QUALITY = 85     # JPEG compression quality
+
 GROQ_MODEL = "meta-llama/llama-4-scout-17b-16e-instruct"
 
-SYSTEM_PROMPT = """You are a VERY STRICT image moderation and validation system for a close-up romantic video product.
-Your task is to analyze a single uploaded image and classify it into ONE of the following categories ONLY:
+SYSTEM_PROMPT = """You are an EXTREMELY STRICT image moderation system for a close-up romantic video product.
+Analyze the image and classify it into ONE category ONLY.
 
-REJECT_RELIGIOUS – if the image contains ANY religious elements, including but not limited to:
-- Religious symbols (cross, crescent, star of David, om, tilak, bindi, rosary, etc.)
-- Religious clothing or headwear (hijab, niqab, turban, skullcap, priest/nun robes)
-- Places of worship (temple, church, mosque, shrine)
-- Religious text, idols, ceremonies, prayer gestures
+REJECT_RELIGIOUS – ANY religious elements:
+- Religious symbols (cross, crescent, om, tilak, bindi, rosary, etc.)
+- Religious clothing (hijab, niqab, turban, skullcap, robes)
+- Places of worship, religious text, idols, prayer gestures
 
-REJECT_NSFW – if the image contains ANY sexual, suggestive, or inappropriate content, including:
+REJECT_NSFW – ANY inappropriate content:
 - Nudity, partial nudity, cleavage emphasis
 - Sexual or seductive poses
-- Bedroom or bed scenes implying intimacy
-- Lingerie, see-through clothing, towel-only images
+- Bedroom/intimate scenes, lingerie, towel-only
 
-REJECT_INVALID – if the image is unsuitable for close-up face video generation, including:
-- Photo of a photo, framed photo, or image displayed on a phone or screen
-- AI-generated, cartoon, anime, illustration, heavily edited or filtered face
-- Multiple people or more than one visible face
-- Face not centered, not facing the camera, side profile, tilted, looking away
-- Face too far, cropped, partially visible, or not a clear close-up
-- Sunglasses, masks, helmets, hands covering face
+REJECT_INVALID – Image unsuitable for face video generation:
+- HANDS OR FINGERS touching, covering, or near the face (even partially)
+- Any object obscuring the face (phone, food, drink, pen, etc.)
+- Face not 100% clearly visible and unobstructed
+- Photo of a photo, screenshot, or image on a screen
+- AI-generated, cartoon, anime, illustration, filtered face
+- Multiple people or faces
+- Side profile, tilted head, looking away (must be front-facing)
+- Face too far, too close, cropped, or not centered
+- Sunglasses, masks, helmets, hats covering face
+- Hair covering significant part of face (eyes, nose, or mouth)
 - Child or minor
-- Celebrity, public figure, or stock photo
-- Non-human, mannequin, doll, statue, or object
-- Extremely blurry, dark, overexposed, or low-quality images
+- Celebrity or public figure
+- Blurry, dark, overexposed, or low-quality image
+- Unusual expressions (tongue out, eyes closed, making faces)
 
 APPROVED – ONLY if ALL conditions are met:
-- Exactly one real adult human face
-- Front-facing, looking directly at the camera
-- Clear, well-lit, close-up selfie
-- Neutral background preferred
-- No religious, NSFW, artificial, or invalid elements
+- ONE real adult human face, clearly visible
+- Face is 100% unobstructed (NO hands, fingers, objects, hair blocking)
+- Front-facing, looking directly at camera, eyes open
+- Clear, well-lit, sharp image quality
+- Natural expression (neutral or slight smile)
+- No religious, NSFW, or invalid elements
 
-IMPORTANT RULES:
-- Be extremely conservative.
-- If you are unsure, DO NOT approve.
-- Default to rejection.
-- Do NOT explain your reasoning.
-- Return ONLY one word from the following list:
+CRITICAL RULES:
+- Be EXTREMELY strict. When in doubt, REJECT.
+- If ANY part of face is covered by hands/fingers → REJECT_INVALID
+- If face is not perfectly clear and visible → REJECT_INVALID
+- Return ONLY one word:
 
 REJECT_RELIGIOUS
 REJECT_NSFW
@@ -82,6 +92,51 @@ def get_reason_for_label(label: ImageLabel) -> str:
     return reasons.get(label, "Image validation failed. Please try again.")
 
 
+def resize_image(file_bytes: bytes, max_size: int = MAX_IMAGE_SIZE) -> tuple[bytes, str]:
+    """
+    Resize image to max dimensions while maintaining aspect ratio.
+    Converts to JPEG for smaller size.
+
+    Returns:
+        (resized_bytes, mime_type)
+    """
+    try:
+        img = Image.open(io.BytesIO(file_bytes))
+
+        # Convert RGBA to RGB (JPEG doesn't support transparency)
+        if img.mode in ('RGBA', 'P'):
+            img = img.convert('RGB')
+
+        # Get original dimensions
+        orig_width, orig_height = img.size
+
+        # Only resize if image is larger than max_size
+        if orig_width > max_size or orig_height > max_size:
+            # Calculate new dimensions maintaining aspect ratio
+            if orig_width > orig_height:
+                new_width = max_size
+                new_height = int(orig_height * (max_size / orig_width))
+            else:
+                new_height = max_size
+                new_width = int(orig_width * (max_size / orig_height))
+
+            # Resize using high-quality LANCZOS filter
+            img = img.resize((new_width, new_height), Image.LANCZOS)
+            print(f"🔄 Resized: {orig_width}x{orig_height} → {new_width}x{new_height}")
+        else:
+            print(f"📐 Image size OK: {orig_width}x{orig_height}")
+
+        # Convert to JPEG bytes
+        output = io.BytesIO()
+        img.save(output, format='JPEG', quality=JPEG_QUALITY, optimize=True)
+        output.seek(0)
+
+        return output.read(), 'image/jpeg'
+    except Exception as e:
+        print(f"⚠️ Resize failed, using original: {e}")
+        return file_bytes, 'image/jpeg'
+
+
 def to_data_url(file_bytes: bytes, mime_type: str) -> str:
     base64_encoded = base64.b64encode(file_bytes).decode('utf-8')
     return f"data:{mime_type};base64,{base64_encoded}"
@@ -92,12 +147,33 @@ async def check_photo(photo: UploadFile = File(...)):
     """
     Validates a photo using Groq AI to check if it meets requirements.
 
+    Features:
+    - Multiple API keys with automatic load balancing (3x capacity)
+    - Automatic failover when one key hits rate limit
+    - Queue system for burst traffic handling
+
     Returns:
         - valid: Boolean indicating if photo is acceptable
         - reason/message: Description of validation result
         - label: Classification label (APPROVED, REJECT_RELIGIOUS, REJECT_NSFW, REJECT_INVALID)
         - usage: Token usage statistics
     """
+
+    # Get available API key (round-robin with failover)
+    key_result = GroqKeyManager.get_available_key()
+
+    if not key_result:
+        # All keys exhausted - return rate limit response
+        retry_after = GroqKeyManager.get_retry_after()
+        remaining = GroqKeyManager.get_total_remaining()
+        print(f"⚠️ All Groq API keys at limit. Retry after {retry_after}s (remaining: {remaining})")
+        raise HTTPException(
+            status_code=429,
+            detail=f"Service is busy. Please try again in {retry_after} seconds.",
+            headers={"Retry-After": str(retry_after)}
+        )
+
+    api_key, key_index = key_result
 
     print(f"📸 Received photo: {photo.filename}, Content-Type: {photo.content_type}")
 
@@ -122,16 +198,21 @@ async def check_photo(photo: UploadFile = File(...)):
             detail="Image size must be less than 10MB"
         )
 
-    # Create data URL for Groq API
-    data_url = to_data_url(file_bytes, photo.content_type)
+    # Resize image for faster processing (fewer tokens = faster response)
+    resized_bytes, mime_type = resize_image(file_bytes)
+    resized_size = len(resized_bytes)
+    print(f"📦 After resize: {resized_size} bytes ({resized_size / 1024:.2f} KB) - Saved {((file_size - resized_size) / file_size * 100):.1f}%")
 
-    # Call Groq API
+    # Create data URL for Groq API
+    data_url = to_data_url(resized_bytes, mime_type)
+
+    # Call Groq API with selected key
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:
             response = await client.post(
                 "https://api.groq.com/openai/v1/chat/completions",
                 headers={
-                    "Authorization": f"Bearer {settings.GROQ_API_KEY}",
+                    "Authorization": f"Bearer {api_key}",
                     "Content-Type": "application/json",
                 },
                 json={
@@ -215,3 +296,156 @@ async def check_photo(photo: UploadFile = File(...)):
             status_code=500,
             detail="Image validation failed. Please try again."
         )
+
+
+class QueueResponse(BaseModel):
+    """Response for queued validation requests"""
+    status: str
+    validation_id: Optional[str] = None
+    position: Optional[int] = None
+    message: str
+
+
+class StatusResponse(BaseModel):
+    """Response for validation status check"""
+    status: str  # "queued", "processing", "completed", "not_found"
+    position: Optional[int] = None
+    result: Optional[ValidationResponse] = None
+    message: str
+
+
+class CapacityResponse(BaseModel):
+    """Response for capacity info"""
+    total_keys: int
+    remaining_requests: int
+    queue_size: int
+    retry_after: int
+
+
+@router.post("/queue_photo", response_model=QueueResponse)
+async def queue_photo(photo: UploadFile = File(...)):
+    """
+    Queue a photo for validation when service is at capacity.
+
+    This endpoint:
+    1. First tries to validate immediately if capacity is available
+    2. If all API keys are exhausted, queues the request
+    3. Returns a validation_id to check status later
+
+    Use /status/{validation_id} to check result.
+    """
+    # First, try to get an available key
+    key_result = GroqKeyManager.get_available_key()
+
+    if key_result:
+        # Capacity available - redirect to immediate validation
+        # Reset file position since we read it for checking
+        await photo.seek(0)
+        return QueueResponse(
+            status="processing",
+            message="Capacity available. Use /check_photo for immediate validation."
+        )
+
+    # All keys exhausted - queue the request
+    print(f"📸 Queueing photo: {photo.filename}")
+
+    # Validate file type
+    if not photo.content_type or not photo.content_type.startswith('image/'):
+        raise HTTPException(status_code=400, detail="File must be an image")
+
+    # Read and resize
+    file_bytes = await photo.read()
+    if len(file_bytes) > 10 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="Image size must be less than 10MB")
+
+    resized_bytes, mime_type = resize_image(file_bytes)
+    data_url = to_data_url(resized_bytes, mime_type)
+
+    # Generate validation ID and queue
+    validation_id = str(uuid4())
+    success = PhotoValidationQueue.enqueue(validation_id, data_url)
+
+    if not success:
+        raise HTTPException(
+            status_code=503,
+            detail="Queue is full. Please try again later."
+        )
+
+    queue_size = PhotoValidationQueue.get_queue_size()
+
+    return QueueResponse(
+        status="queued",
+        validation_id=validation_id,
+        position=queue_size,
+        message=f"Request queued at position {queue_size}. Check status with /status/{validation_id}"
+    )
+
+
+@router.get("/status/{validation_id}", response_model=StatusResponse)
+async def get_validation_status(validation_id: str):
+    """
+    Check the status of a queued photo validation.
+
+    Returns:
+        - status: "queued", "processing", "completed", or "not_found"
+        - position: Queue position if still queued
+        - result: Validation result if completed
+    """
+    status_data = PhotoValidationQueue.get_status(validation_id)
+
+    if not status_data:
+        return StatusResponse(
+            status="not_found",
+            message="Validation request not found or expired."
+        )
+
+    if status_data["status"] == "completed":
+        result_data = status_data.get("result", {})
+        return StatusResponse(
+            status="completed",
+            result=ValidationResponse(
+                valid=result_data.get("valid", False),
+                reason=result_data.get("reason"),
+                message=result_data.get("message"),
+                label=result_data.get("label")
+            ),
+            message="Validation completed."
+        )
+
+    if status_data["status"] == "processing":
+        return StatusResponse(
+            status="processing",
+            message="Your photo is being validated."
+        )
+
+    # Still queued
+    position = status_data.get("position", 0)
+    return StatusResponse(
+        status="queued",
+        position=position,
+        message=f"Your request is at position {position} in the queue."
+    )
+
+
+@router.get("/capacity", response_model=CapacityResponse)
+async def get_capacity():
+    """
+    Get current API capacity information.
+
+    Returns:
+        - total_keys: Number of configured API keys
+        - remaining_requests: Total remaining requests across all keys
+        - queue_size: Current queue size
+        - retry_after: Seconds until capacity becomes available
+    """
+    total_keys = len(settings.groq_api_keys_list)
+    remaining = GroqKeyManager.get_total_remaining()
+    queue_size = PhotoValidationQueue.get_queue_size()
+    retry_after = GroqKeyManager.get_retry_after() if remaining == 0 else 0
+
+    return CapacityResponse(
+        total_keys=total_keys,
+        remaining_requests=remaining,
+        queue_size=queue_size,
+        retry_after=retry_after
+    )
