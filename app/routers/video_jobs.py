@@ -8,10 +8,16 @@ from pydantic import BaseModel
 from app.core.database import get_db
 from app.core.security import decrypt_phone
 from app.core.timezone import get_ist_now
+from app.core.admin_auth import get_current_admin
 from app.models.video_job import VideoJob
+from app.models.video_assets import VideoAssets
 from app.models.user import User
 
-router = APIRouter(prefix="/api/v1/video-jobs", tags=["video-jobs"])
+router = APIRouter(
+    prefix="/api/v1/video-jobs",
+    tags=["video-jobs"],
+    dependencies=[Depends(get_current_admin)],
+)
 
 
 class VideoJobResponse(BaseModel):
@@ -30,6 +36,17 @@ class VideoJobResponse(BaseModel):
     last_error_code: Optional[str] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+        populate_by_name = True
+
+
+class VideoJobDetailResponse(VideoJobResponse):
+    """Extended response with photo and user details"""
+    raw_selfie_url: Optional[str] = None
+    terms_accepted: Optional[bool] = None
+    video_count: Optional[int] = None
 
     class Config:
         from_attributes = True
@@ -185,13 +202,13 @@ def list_video_jobs(
     )
 
 
-@router.get("/{job_id}", response_model=VideoJobResponse)
+@router.get("/{job_id}", response_model=VideoJobDetailResponse)
 def get_video_job(
     job_id: int,
     db: Session = Depends(get_db)
 ):
     """
-    Get a specific video job by ID.
+    Get a specific video job by ID with full details including photo URL.
     """
     job = db.query(VideoJob).filter(VideoJob.id == job_id).first()
 
@@ -204,14 +221,22 @@ def get_video_job(
     # Get user and decrypt phone
     user = db.query(User).filter(User.id == job.user_id).first()
     mobile_number = None
-    if user and user.phone_encrypted:
-        try:
-            mobile_number = decrypt_phone(user.phone_encrypted)
-        except Exception as e:
-            print(f"⚠️ Failed to decrypt phone for user {user.id}: {str(e)}")
-            mobile_number = "***ENCRYPTED***"
+    terms_accepted = None
+    video_count = None
+    if user:
+        terms_accepted = user.terms_accepted
+        video_count = user.video_count
+        if user.phone_encrypted:
+            try:
+                mobile_number = decrypt_phone(user.phone_encrypted)
+            except Exception as e:
+                print(f"⚠️ Failed to decrypt phone for user {user.id}: {str(e)}")
+                mobile_number = "***ENCRYPTED***"
 
-    # Create response with mobile number
+    # Get photo URL from video_assets
+    assets = db.query(VideoAssets).filter(VideoAssets.job_id == job_id).first()
+    raw_selfie_url = assets.raw_selfie_url if assets else None
+
     job_dict = {
         "id": job.id,
         "user_id": job.user_id,
@@ -227,10 +252,13 @@ def get_video_job(
         "failed_stage": job.failed_stage,
         "last_error_code": job.last_error_code,
         "created_at": job.created_at,
-        "updated_at": job.updated_at
+        "updated_at": job.updated_at,
+        "raw_selfie_url": raw_selfie_url,
+        "terms_accepted": terms_accepted,
+        "video_count": video_count,
     }
 
-    return VideoJobResponse(**job_dict)
+    return VideoJobDetailResponse(**job_dict)
 
 
 @router.get("/stats/summary")

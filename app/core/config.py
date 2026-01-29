@@ -22,6 +22,11 @@ class Settings(BaseSettings):
     REDIS_PASSWORD: Optional[str] = None
     REDIS_DB: int = 0
 
+    # Admin Auth
+    ADMIN_USERNAME: str
+    ADMIN_PASSWORD_HASH: str
+    JWT_SECRET_KEY: str
+
     class Config:
         env_file = ".env"
 
