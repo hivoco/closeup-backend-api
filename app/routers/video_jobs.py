@@ -1,3 +1,6 @@
+import logging
+import httpx
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import desc, and_
@@ -8,10 +11,13 @@ from pydantic import BaseModel
 from app.core.database import get_db
 from app.core.security import decrypt_phone
 from app.core.timezone import get_ist_now
+from app.core.config import settings
 from app.core.admin_auth import get_current_admin
 from app.models.video_job import VideoJob
 from app.models.video_assets import VideoAssets
 from app.models.user import User
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(
     prefix="/api/v1/video-jobs",
@@ -43,8 +49,12 @@ class VideoJobResponse(BaseModel):
 
 
 class VideoJobDetailResponse(VideoJobResponse):
-    """Extended response with photo and user details"""
+    """Extended response with photo, video assets and user details"""
     raw_selfie_url: Optional[str] = None
+    normalized_image_url: Optional[str] = None
+    lipsync_seg2_url: Optional[str] = None
+    lipsync_seg4_url: Optional[str] = None
+    final_video_url: Optional[str] = None
     terms_accepted: Optional[bool] = None
     video_count: Optional[int] = None
 
@@ -124,8 +134,8 @@ def list_video_jobs(
     total_pages = (total + page_size - 1) // page_size  # Ceiling division
     offset = (page - 1) * page_size
 
-    # Order by latest updated first and apply pagination
-    jobs = query.order_by(desc(VideoJob.updated_at)).offset(offset).limit(page_size).all()
+    # Order by latest created first and apply pagination
+    jobs = query.order_by(desc(VideoJob.id)).offset(offset).limit(page_size).all()
 
     # Build response items with mobile numbers
     items = []
@@ -233,9 +243,8 @@ def get_video_job(
                 print(f"⚠️ Failed to decrypt phone for user {user.id}: {str(e)}")
                 mobile_number = "***ENCRYPTED***"
 
-    # Get photo URL from video_assets
+    # Get all asset URLs from video_assets
     assets = db.query(VideoAssets).filter(VideoAssets.job_id == job_id).first()
-    raw_selfie_url = assets.raw_selfie_url if assets else None
 
     job_dict = {
         "id": job.id,
@@ -253,7 +262,11 @@ def get_video_job(
         "last_error_code": job.last_error_code,
         "created_at": job.created_at,
         "updated_at": job.updated_at,
-        "raw_selfie_url": raw_selfie_url,
+        "raw_selfie_url": assets.raw_selfie_url if assets else None,
+        "normalized_image_url": assets.normalized_image_url if assets else None,
+        "lipsync_seg2_url": assets.lipsync_seg2_url if assets else None,
+        "lipsync_seg4_url": assets.lipsync_seg4_url if assets else None,
+        "final_video_url": assets.final_video_url if assets else None,
         "terms_accepted": terms_accepted,
         "video_count": video_count,
     }
@@ -478,3 +491,97 @@ def update_job_by_job_id(
         "message": f"Job {job_id} status updated to '{status}' successfully (retry_count: {job.retry_count})",
         "job": VideoJobResponse(**job_dict)
     }
+
+
+@router.post("/{job_id}/send-video")
+def send_video_whatsapp(
+    job_id: int,
+    db: Session = Depends(get_db),
+):
+    """
+    Send the final video to the user via WhatsApp.
+
+    Fetches the final_video_url from video_assets and the user's phone number,
+    then sends it using the video_16 WhatsApp template.
+    """
+    job = db.query(VideoJob).filter(VideoJob.id == job_id).first()
+    if not job:
+        raise HTTPException(status_code=404, detail=f"Video job {job_id} not found")
+
+    assets = db.query(VideoAssets).filter(VideoAssets.job_id == job_id).first()
+    if not assets or not assets.final_video_url:
+        raise HTTPException(status_code=400, detail="Final video is not available yet for this job")
+
+    user = db.query(User).filter(User.id == job.user_id).first()
+    if not user or not user.phone_encrypted:
+        raise HTTPException(status_code=400, detail="User phone number not found")
+
+    try:
+        mobile_number = decrypt_phone(user.phone_encrypted)
+    except Exception:
+        raise HTTPException(status_code=500, detail="Failed to decrypt user phone number")
+
+    # Format phone with 91 prefix
+    phone = mobile_number.strip().replace("+", "").replace(" ", "").replace("-", "")
+    if not phone.startswith("91"):
+        phone = "91" + phone
+
+    payload = {
+        "messaging_product": "whatsapp",
+        "to": phone,
+        "type": "template",
+        "template": {
+            "name": "video_16",
+            "language": {"code": "en"},
+            "components": [
+                {
+                    "type": "header",
+                    "parameters": [
+                        {
+                            "type": "video",
+                            "video": {
+                                "link": assets.final_video_url
+                            }
+                        }
+                    ]
+                }
+            ]
+        }
+    }
+
+    try:
+        response = httpx.post(
+            settings.WHATSAPP_API_URL,
+            json=payload,
+            headers={
+                "X-API-KEY": settings.WHATSAPP_API_KEY,
+                "Content-Type": "application/json",
+            },
+            timeout=15.0,
+        )
+        logger.info("WhatsApp send video response [%s]: %s", response.status_code, response.text)
+
+        if response.status_code not in (200, 201):
+            raise HTTPException(
+                status_code=502,
+                detail=f"WhatsApp API error: {response.text}"
+            )
+
+        # Update job status to sent
+        job.status = "sent"
+        job.updated_at = get_ist_now()
+        db.commit()
+
+        return {
+            "success": True,
+            "message": f"Video sent to {phone} via WhatsApp. Job status updated to 'sent'.",
+            "job_id": job_id,
+        }
+
+    except httpx.TimeoutException:
+        raise HTTPException(status_code=504, detail="WhatsApp API timed out")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Send video error: %s", str(e))
+        raise HTTPException(status_code=500, detail=f"Failed to send video: {str(e)}")

@@ -155,10 +155,10 @@ async def submit_video_form(
     phone_hash = hash_phone(mobile_number)
     user = db.query(User).filter(User.phone_hash == phone_hash).first()
 
-    if user and user.video_count >= 3:
+    if user and user.video_count >= 5:
         raise HTTPException(
             status_code=403,
-            detail="You have already generated the maximum of three videos"
+            detail="You have already generated the maximum of five videos"
         )
 
     if not user:
@@ -203,7 +203,7 @@ async def submit_video_form(
 
         if existing_job:
             # User already submitted, just send new OTP
-            otp ="000000"
+            otp = generate_otp()
             logger.info("OTP for %s: %s", mobile_number, otp)
 
             db.add(UserOTP(
@@ -247,7 +247,7 @@ async def submit_video_form(
             db.add(VideoAssets(job_id=job.id, raw_selfie_url=url))
 
             # Generate and send OTP
-            otp ="000000"
+            otp = generate_otp()
             logger.info("OTP for %s: %s", mobile_number, otp)
 
             db.add(UserOTP(

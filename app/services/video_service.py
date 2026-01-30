@@ -8,7 +8,7 @@ def handle_video_submit(db: Session, payload):
 
     user = db.query(User).filter_by(phone_hash=phone_hash).first()
 
-    if user and user.video_count >= 3:
+    if user and user.video_count >= 5:
         raise ValueError("VIDEO_LIMIT")
 
     if not user:

@@ -22,6 +22,10 @@ class Settings(BaseSettings):
     REDIS_PASSWORD: Optional[str] = None
     REDIS_DB: int = 0
 
+    # WhatsApp API
+    WHATSAPP_API_URL: str
+    WHATSAPP_API_KEY: str
+
     # Admin Auth
     ADMIN_USERNAME: str
     ADMIN_PASSWORD_HASH: str

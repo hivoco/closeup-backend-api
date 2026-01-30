@@ -7,5 +7,10 @@ class VideoAssets(Base):
 
     job_id = Column(BigInteger, primary_key=True)
     raw_selfie_url = Column(Text)
+    normalized_image_url = Column(Text)
+    lipsync_seg2_url = Column(Text)
+    lipsync_seg4_url = Column(Text)
+    final_video_url = Column(Text)
+    error = Column(Text)
     created_at = Column(DateTime, default=get_ist_now, nullable=False)
     updated_at = Column(DateTime, default=get_ist_now, onupdate=get_ist_now, nullable=False)

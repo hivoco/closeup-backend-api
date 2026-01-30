@@ -7,7 +7,7 @@ from datetime import timedelta
 
 from app.core.database import get_db
 from app.core.security import hash_phone
-from app.core.otp import generate_otp, hash_otp, send_otp
+from app.core.otp import generate_otp, hash_otp, send_otp, send_thank_you
 from app.core.timezone import get_ist_now
 from app.core.config import settings
 from app.core.redis import RateLimiter, Cache
@@ -117,6 +117,12 @@ def verify_otp(payload: dict, db: Session = Depends(get_db)):
 
         print(f"✅ Job {waiting_job.id} status changed: wait → queued")
 
+        # Send thank you WhatsApp message
+        try:
+            send_thank_you(mobile_number)
+        except Exception as e:
+            logger.warning("Failed to send thank you message: %s", str(e))
+
         return {
             "status": "verified",
             "job_id": waiting_job.id,
@@ -124,6 +130,13 @@ def verify_otp(payload: dict, db: Session = Depends(get_db)):
         }
 
     db.commit()
+
+    # Send thank you WhatsApp message
+    try:
+        send_thank_you(mobile_number)
+    except Exception as e:
+        logger.warning("Failed to send thank you message: %s", str(e))
+
     return {
         "status": "verified",
         "message": "OTP verified successfully."
@@ -200,7 +213,7 @@ def resend_otp(payload: dict, db: Session = Depends(get_db)):
         )
 
     # Generate new OTP
-    otp ="000000"
+    otp = generate_otp()
     logger.info("RESEND OTP for %s: %s", mobile_number, otp)
 
     # Save OTP to database
