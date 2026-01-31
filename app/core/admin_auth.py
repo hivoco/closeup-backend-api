@@ -1,3 +1,4 @@
+import hmac
 import bcrypt
 from datetime import datetime, timedelta
 from jose import JWTError, jwt
@@ -28,6 +29,12 @@ def get_current_admin(
     credentials: HTTPAuthorizationCredentials = Depends(security),
 ) -> str:
     token = credentials.credentials
+
+    # Check if it's an internal API key (server-to-server)
+    if hmac.compare_digest(token, settings.INTERNAL_API_KEY):
+        return "internal_service"
+
+    # Otherwise treat as JWT (admin panel login)
     try:
         payload = jwt.decode(token, settings.JWT_SECRET_KEY, algorithms=[ALGORITHM])
         username: str = payload.get("sub")

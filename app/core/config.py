@@ -9,8 +9,8 @@ class Settings(BaseSettings):
 
     AWS_REGION: str
     AWS_S3_BUCKET: str
-    AWS_ACCESS_KEY_ID: str
-    AWS_SECRET_ACCESS_KEY: str
+    AWS_ACCESS_KEY_ID: Optional[str] = None
+    AWS_SECRET_ACCESS_KEY: Optional[str] = None
 
     # Groq API Keys (comma-separated for multiple keys)
     # Example: "key1,key2,key3" for 3x capacity
@@ -26,10 +26,16 @@ class Settings(BaseSettings):
     WHATSAPP_API_URL: str
     WHATSAPP_API_KEY: str
 
+    # App Environment (development / production)
+    APP_ENV: str = "development"
+
     # Admin Auth
     ADMIN_USERNAME: str
     ADMIN_PASSWORD_HASH: str
     JWT_SECRET_KEY: str
+
+    # Internal API Key (server-to-server)
+    INTERNAL_API_KEY: str
 
     class Config:
         env_file = ".env"
