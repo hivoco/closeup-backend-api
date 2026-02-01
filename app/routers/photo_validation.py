@@ -30,6 +30,18 @@ REJECT_NSFW – ANY inappropriate content:
 - Sexual or seductive poses
 - Bedroom/intimate scenes, lingerie, towel-only
 
+REJECT_ANGLE_LOW – Camera is held too LOW (below face level):
+- Face is angled downward / chin is tucked
+- Camera is looking UP at the person from below
+- Nostrils or underside of chin are prominently visible
+- Person appears to be looking down at the camera
+
+REJECT_ANGLE_HIGH – Camera is held too HIGH (above face level):
+- Face is angled upward / chin is raised
+- Camera is looking DOWN at the person from above
+- Top of head or forehead is overly prominent
+- Person appears to be looking up at the camera
+
 REJECT_INVALID – Image unsuitable for face video generation:
 - HANDS OR FINGERS touching, covering, or near the face (even partially)
 - Any object obscuring the face (phone, food, drink, pen, etc.)
@@ -50,6 +62,7 @@ APPROVED – ONLY if ALL conditions are met:
 - ONE real adult human face, clearly visible
 - Face is 100% unobstructed (NO hands, fingers, objects, hair blocking)
 - Front-facing, looking directly at camera, eyes open
+- Camera is at face level (straight on, not from above or below)
 - Clear, well-lit, sharp image quality
 - Natural expression (neutral or slight smile)
 - No religious, NSFW, or invalid elements
@@ -58,14 +71,18 @@ CRITICAL RULES:
 - Be EXTREMELY strict. When in doubt, REJECT.
 - If ANY part of face is covered by hands/fingers → REJECT_INVALID
 - If face is not perfectly clear and visible → REJECT_INVALID
+- If camera angle is from below face level → REJECT_ANGLE_LOW
+- If camera angle is from above face level → REJECT_ANGLE_HIGH
 - Return ONLY one word:
 
 REJECT_RELIGIOUS
 REJECT_NSFW
+REJECT_ANGLE_LOW
+REJECT_ANGLE_HIGH
 REJECT_INVALID
 APPROVED"""
 
-ImageLabel = Literal["REJECT_RELIGIOUS", "REJECT_NSFW", "REJECT_INVALID", "APPROVED"]
+ImageLabel = Literal["REJECT_RELIGIOUS", "REJECT_NSFW", "REJECT_ANGLE_LOW", "REJECT_ANGLE_HIGH", "REJECT_INVALID", "APPROVED"]
 
 
 class Usage(BaseModel):
@@ -86,6 +103,8 @@ def get_reason_for_label(label: ImageLabel) -> str:
     reasons = {
         "REJECT_RELIGIOUS": "Religious symbols or imagery detected. Please upload a simple personal photo without religious elements.",
         "REJECT_NSFW": "Inappropriate or NSFW content detected. Please upload an appropriate photo.",
+        "REJECT_ANGLE_LOW": "Your camera is too low. Please hold your phone at face level and take a straight photo.",
+        "REJECT_ANGLE_HIGH": "Your camera is too high. Please hold your phone at face level and take a straight photo.",
         "REJECT_INVALID": "Photo does not meet requirements. Please upload a clear, front-facing selfie with only your face visible.",
         "APPROVED": "Photo validated successfully!"
     }
