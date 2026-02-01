@@ -8,7 +8,7 @@ import os
 
 from app.core.database import get_db
 from app.core.security import hash_phone, encrypt_phone
-from app.core.otp import generate_otp, hash_otp, send_otp
+from app.core.otp import generate_otp, hash_otp, send_otp, send_thank_you
 from app.core.config import settings
 from app.core.s3 import upload_fileobj_to_s3
 from app.core.timezone import get_ist_now
@@ -324,6 +324,12 @@ async def submit_video_form(
 
         # Cache the new pending job
         Cache.set_pending_video(user.id, str(job.id))
+
+        # Send thank you WhatsApp message
+        try:
+            send_thank_you(mobile_number)
+        except Exception as e:
+            logger.warning("Failed to send thank you message: %s", str(e))
 
         return {
             "status": "video_created",
