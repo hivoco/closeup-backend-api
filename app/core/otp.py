@@ -20,8 +20,10 @@ def hash_otp(otp: str) -> str:
 def _format_phone(mobile_number: str) -> str:
     """Ensure phone number has 91 prefix for WhatsApp."""
     phone = mobile_number.strip().replace("+", "").replace(" ", "").replace("-", "")
-    if not phone.startswith("91"):
+    if len(phone) == 10:
         phone = "91" + phone
+    elif len(phone) == 12 and phone.startswith("91"):
+        pass  # already formatted
     return phone
 
 
