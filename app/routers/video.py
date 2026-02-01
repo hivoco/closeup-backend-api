@@ -155,10 +155,10 @@ async def submit_video_form(
     phone_hash = hash_phone(mobile_number)
     user = db.query(User).filter(User.phone_hash == phone_hash).first()
 
-    if user and user.video_count >= 5:
+    if user and user.video_count >= 200:
         raise HTTPException(
             status_code=403,
-            detail="You have already generated the maximum of five videos"
+            detail="You have already generated the maximum number of videos"
         )
 
     if not user:
