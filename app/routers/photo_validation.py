@@ -110,7 +110,7 @@ class ValidationResponse(BaseModel):
 
 def get_reason_for_label(label: ImageLabel) -> str:
     reasons = {
-        "REJECT_RELIGIOUS": "Religious symbols or imagery detected. Please upload a simple personal photo without religious elements.",
+        "REJECT_RELIGIOUS": "Photo does not meet requirements. Please upload a clear, front-facing selfie with only your face visible.",
         "REJECT_NSFW": "Inappropriate or NSFW content detected. Please upload an appropriate photo.",
         "REJECT_ANGLE_LOW": "Your camera is too low. Please hold your phone at face level and take a straight photo.",
         "REJECT_ANGLE_HIGH": "Your camera is too high. Please hold your phone at face level and take a straight photo.",
