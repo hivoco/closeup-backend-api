@@ -13,6 +13,7 @@ from app.core.security import decrypt_phone, hash_phone
 from app.core.timezone import get_ist_now
 from app.core.config import settings
 from app.core.admin_auth import get_current_admin
+from app.core.otp import send_failed_message
 from app.models.video_job import VideoJob
 from app.models.video_assets import VideoAssets
 from app.models.user import User
@@ -495,6 +496,14 @@ def update_job_by_job_id(
         except Exception as e:
             print(f"⚠️ Failed to decrypt phone for user {user.id}: {str(e)}")
             mobile_number = "***ENCRYPTED***"
+
+    # Send failed message via WhatsApp when status is changed to "failed"
+    if status == "failed" and mobile_number and mobile_number != "***ENCRYPTED***":
+        try:
+            send_failed_message(mobile_number)
+            print(f"📩 Failed message sent to {mobile_number} for job {job_id}")
+        except Exception as e:
+            print(f"⚠️ Failed to send failed message for job {job_id}: {str(e)}")
 
     # Create response
     job_dict = {

@@ -115,3 +115,40 @@ def send_thank_you(mobile_number: str) -> bool:
     except Exception as e:
         logger.error("WhatsApp thank_you error: %s", str(e))
         return False
+
+
+def send_failed_message(mobile_number: str) -> bool:
+    """Send failed notification when video generation fails."""
+    phone = _format_phone(mobile_number)
+
+    payload = {
+        "messaging_product": "whatsapp",
+        "to": phone,
+        "type": "template",
+        "template": {
+            "name": "failed_1",
+            "language": {"code": "en"},
+        }
+    }
+
+    try:
+        response = httpx.post(
+            settings.WHATSAPP_API_URL,
+            json=payload,
+            headers={
+                "X-API-KEY": settings.WHATSAPP_API_KEY,
+                "Content-Type": "application/json",
+            },
+            timeout=10.0,
+        )
+        logger.info("WhatsApp failed_1 response [%s]: %s", response.status_code, response.text)
+
+        if response.status_code in (200, 201):
+            logger.info("Failed message sent to %s", phone)
+            return True
+        else:
+            logger.warning("WhatsApp failed_1 failed [%s]: %s", response.status_code, response.text)
+            return False
+    except Exception as e:
+        logger.error("WhatsApp failed_1 error: %s", str(e))
+        return False
