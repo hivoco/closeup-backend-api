@@ -42,6 +42,13 @@ REJECT_ANGLE_HIGH – Camera is held too HIGH (above face level):
 - Top of head or forehead is overly prominent
 - Person appears to be looking up at the camera
 
+REJECT_HAZY – Photo is hazy, foggy, or unclear:
+- Image looks hazy, foggy, or has a misty appearance
+- Blurry or out-of-focus photo where facial features are not sharp
+- Dirty or smudged camera lens causing unclear image
+- Low light, dark, or overexposed photo where face details are lost
+- Steam, smoke, or any visual obstruction causing haziness
+
 REJECT_INVALID – Image unsuitable for face video generation:
 - HANDS OR FINGERS touching, covering, or near the face (even partially)
 - Any object obscuring the face (phone, food, drink, pen, etc.)
@@ -55,7 +62,6 @@ REJECT_INVALID – Image unsuitable for face video generation:
 - Hair covering significant part of face (eyes, nose, or mouth)
 - Child or minor
 - Celebrity or public figure
-- Blurry, dark, overexposed, or low-quality image
 - Unusual expressions (tongue out, eyes closed, making faces)
 
 APPROVED – ONLY if ALL conditions are met:
@@ -73,16 +79,18 @@ CRITICAL RULES:
 - If face is not perfectly clear and visible → REJECT_INVALID
 - If camera angle is from below face level → REJECT_ANGLE_LOW
 - If camera angle is from above face level → REJECT_ANGLE_HIGH
+- If image is hazy, blurry, foggy, or unclear → REJECT_HAZY
 - Return ONLY one word:
 
 REJECT_RELIGIOUS
 REJECT_NSFW
 REJECT_ANGLE_LOW
 REJECT_ANGLE_HIGH
+REJECT_HAZY
 REJECT_INVALID
 APPROVED"""
 
-ImageLabel = Literal["REJECT_RELIGIOUS", "REJECT_NSFW", "REJECT_ANGLE_LOW", "REJECT_ANGLE_HIGH", "REJECT_INVALID", "APPROVED"]
+ImageLabel = Literal["REJECT_RELIGIOUS", "REJECT_NSFW", "REJECT_ANGLE_LOW", "REJECT_ANGLE_HIGH", "REJECT_HAZY", "REJECT_INVALID", "APPROVED"]
 
 
 class Usage(BaseModel):
@@ -105,6 +113,7 @@ def get_reason_for_label(label: ImageLabel) -> str:
         "REJECT_NSFW": "Inappropriate or NSFW content detected. Please upload an appropriate photo.",
         "REJECT_ANGLE_LOW": "Your camera is too low. Please hold your phone at face level and take a straight photo.",
         "REJECT_ANGLE_HIGH": "Your camera is too high. Please hold your phone at face level and take a straight photo.",
+        "REJECT_HAZY": "Your photo is not clear. Please clean your camera lens and take the photo in good lighting.",
         "REJECT_INVALID": "Photo does not meet requirements. Please upload a clear, front-facing selfie with only your face visible.",
         "APPROVED": "Photo validated successfully!"
     }

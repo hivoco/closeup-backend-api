@@ -9,7 +9,7 @@ from datetime import datetime, date
 from pydantic import BaseModel
 
 from app.core.database import get_db
-from app.core.security import decrypt_phone
+from app.core.security import decrypt_phone, hash_phone
 from app.core.timezone import get_ist_now
 from app.core.config import settings
 from app.core.admin_auth import get_current_admin
@@ -83,6 +83,8 @@ def list_video_jobs(
     start_date: Optional[date] = Query(None, description="Filter from date (YYYY-MM-DD)"),
     end_date: Optional[date] = Query(None, description="Filter to date (YYYY-MM-DD)"),
     user_id: Optional[str] = Query(None, description="Filter by user ID"),
+    mobile_number: Optional[str] = Query(None, description="Filter by mobile number (10-digit)"),
+    job_id: Optional[int] = Query(None, description="Filter by job ID"),
 ):
     """
     Get paginated list of video jobs with filters.
@@ -94,6 +96,8 @@ def list_video_jobs(
     - **start_date**: Filter jobs from this date
     - **end_date**: Filter jobs until this date
     - **user_id**: Filter by specific user
+    - **mobile_number**: Filter by mobile number
+    - **job_id**: Filter by job ID
 
     Returns latest updated jobs first.
     """
@@ -109,6 +113,23 @@ def list_video_jobs(
 
     if failed_stage:
         filters.append(VideoJob.failed_stage == failed_stage)
+
+    # If mobile_number provided, find user by phone hash and filter by user_id
+    if mobile_number:
+        phone_hash = hash_phone(mobile_number)
+        user_by_phone = db.query(User).filter(User.phone_hash == phone_hash).first()
+        if user_by_phone:
+            filters.append(VideoJob.user_id == user_by_phone.id)
+        else:
+            # No user found with this number — return empty result
+            return PaginatedVideoJobsResponse(
+                total=0, page=page, page_size=page_size, total_pages=0,
+                items=[], filters_applied={"mobile_number": mobile_number},
+                message=f"No user found with mobile number {mobile_number}."
+            )
+
+    if job_id:
+        filters.append(VideoJob.id == job_id)
 
     if user_id:
         filters.append(VideoJob.user_id == user_id)
@@ -181,6 +202,14 @@ def list_video_jobs(
     if failed_stage:
         filters_applied["failed_stage"] = failed_stage
         filter_parts.append(f"failed_stage='{failed_stage}'")
+
+    if mobile_number:
+        filters_applied["mobile_number"] = mobile_number
+        filter_parts.append(f"mobile_number='{mobile_number}'")
+
+    if job_id:
+        filters_applied["job_id"] = job_id
+        filter_parts.append(f"job_id={job_id}")
 
     if user_id:
         filters_applied["user_id"] = user_id
