@@ -21,9 +21,9 @@ SYSTEM_PROMPT = """You are an EXTREMELY STRICT image moderation system for a clo
 Analyze the image and classify it into ONE category ONLY.
 
 REJECT_RELIGIOUS – ANY religious elements:
-- Religious symbols (cross, crescent, om, tilak, bindi, rosary, etc.)
+- Religious symbols (cross, crescent, om, etc.)
 - Religious clothing (hijab, niqab, skullcap, robes)
-- EXCEPTION: Turbans/pagris are ALLOWED and should NOT be rejected
+- EXCEPTION: Turbans/pagris, tilak, bindi, and rosary are ALLOWED and should NOT be rejected
 - Places of worship, religious text, idols, prayer gestures
 
 REJECT_NSFW – ANY inappropriate content:
