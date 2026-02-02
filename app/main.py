@@ -86,7 +86,7 @@ app.add_middleware(
     allow_origins=[
         "https://admin.closeuplovetunes.in",
         "https://closeuplovetunes.in",
-        "https://www.closeuplovetunes.in"
+        "https://www.closeuplovetunes.in",
     ],
     allow_credentials=True,
     allow_methods=["*"],

@@ -89,7 +89,7 @@ def send_thank_you(mobile_number: str) -> bool:
         "to": phone,
         "type": "template",
         "template": {
-            "name": "thank_you_7",
+            "name": "thank_you_15",
             "language": {"code": "en"},
         }
     }
