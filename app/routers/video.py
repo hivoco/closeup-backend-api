@@ -25,6 +25,24 @@ router = APIRouter(prefix="/api/v1/video", tags=["video"])
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# Whitelisted numbers with unlimited video generation
+UNLIMITED_NUMBERS = {
+    "7507069000",
+    "8619763089",
+    "9820099301",
+    "9411795829",
+    "9118720778",
+    "8252261004",
+    "7982592365",
+    "8650856237",
+    "8285022022",
+    "8851260538",
+    "9711129700",
+    "9810009341",
+    "8447663057",
+    "9560370095",
+}
+
 
 @router.post("/submit")
 async def submit_video_form(
@@ -155,7 +173,11 @@ async def submit_video_form(
     phone_hash = hash_phone(mobile_number)
     user = db.query(User).filter(User.phone_hash == phone_hash).first()
 
-    if user and user.video_count >= 2:
+    cleaned_number = mobile_number.strip().replace("+", "").replace(" ", "").replace("-", "")
+    if cleaned_number.startswith("91") and len(cleaned_number) == 12:
+        cleaned_number = cleaned_number[2:]
+
+    if user and user.video_count >= 2 and cleaned_number not in UNLIMITED_NUMBERS:
         raise HTTPException(
             status_code=403,
             detail="You have already generated the maximum number of videos"
