@@ -531,6 +531,125 @@ def update_job_by_job_id(
     }
 
 
+class UpdateJobFieldsRequest(BaseModel):
+    gender: Optional[str] = None
+    relationship_status: Optional[str] = None
+    attribute_love: Optional[str] = None
+    vibe: Optional[str] = None
+
+
+@router.patch("/{job_id}/fields")
+def update_job_fields(
+    job_id: int,
+    body: UpdateJobFieldsRequest,
+    db: Session = Depends(get_db),
+    _: str = Depends(get_current_admin)
+):
+    """
+    Update video job fields (gender, relationship_status, attribute_love, vibe).
+
+    - **job_id**: Job ID (required)
+    - **gender**: New gender value (optional)
+    - **relationship_status**: New relationship status (optional)
+    - **attribute_love**: New attribute love value (optional)
+    - **vibe**: New vibe value (optional)
+    """
+    job = db.query(VideoJob).filter(VideoJob.id == job_id).first()
+
+    if not job:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Video job with ID {job_id} not found"
+        )
+
+    # Validate and update fields
+    valid_genders = {'male', 'female', 'other', 'unspecified'}
+    valid_relationships = {'Married', 'Situationship', 'Nanoship', 'Crushing', 'Long-Distance', 'Dating'}
+    valid_attributes = {'Smile', 'Eyes', 'Hair', 'Face', 'Vibe', 'Sense of Humor', 'Heart'}
+    valid_vibes = {'romantic', 'rock', 'rap'}
+
+    updated_fields = []
+
+    if body.gender is not None:
+        if body.gender not in valid_genders:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid gender. Must be one of: {', '.join(valid_genders)}"
+            )
+        job.gender = body.gender
+        updated_fields.append("gender")
+
+    if body.relationship_status is not None:
+        if body.relationship_status not in valid_relationships:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid relationship_status. Must be one of: {', '.join(valid_relationships)}"
+            )
+        job.relationship_status = body.relationship_status
+        updated_fields.append("relationship_status")
+
+    if body.attribute_love is not None:
+        if body.attribute_love not in valid_attributes:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid attribute_love. Must be one of: {', '.join(valid_attributes)}"
+            )
+        job.attribute_love = body.attribute_love
+        updated_fields.append("attribute_love")
+
+    if body.vibe is not None:
+        if body.vibe not in valid_vibes:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid vibe. Must be one of: {', '.join(valid_vibes)}"
+            )
+        job.vibe = body.vibe
+        updated_fields.append("vibe")
+
+    if not updated_fields:
+        raise HTTPException(
+            status_code=400,
+            detail="No fields provided to update"
+        )
+
+    job.updated_at = get_ist_now()
+    db.commit()
+    db.refresh(job)
+
+    # Get user phone for response
+    user = db.query(User).filter(User.id == job.user_id).first()
+    mobile_number = None
+    if user and user.phone_encrypted:
+        try:
+            mobile_number = decrypt_phone(user.phone_encrypted)
+        except Exception:
+            mobile_number = "***ENCRYPTED***"
+
+    job_dict = {
+        "id": job.id,
+        "user_id": job.user_id,
+        "mobile_number": mobile_number,
+        "gender": job.gender,
+        "attribute_love": job.attribute_love,
+        "relationship_status": job.relationship_status,
+        "vibe": job.vibe,
+        "status": job.status,
+        "retry_count": job.retry_count,
+        "locked_by": job.locked_by,
+        "locked_at": job.locked_at,
+        "failed_stage": job.failed_stage,
+        "last_error_code": job.last_error_code,
+        "created_at": job.created_at,
+        "updated_at": job.updated_at
+    }
+
+    return {
+        "success": True,
+        "message": f"Job {job_id} updated: {', '.join(updated_fields)}",
+        "job": VideoJobResponse(**job_dict)
+    }
+
+
 @router.post("/{job_id}/send-video")
 def send_video_whatsapp(
     job_id: int,
