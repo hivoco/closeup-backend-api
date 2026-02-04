@@ -623,3 +623,232 @@ def send_video_whatsapp(
     except Exception as e:
         logger.error("Send video error: %s", str(e))
         raise HTTPException(status_code=500, detail=f"Failed to send video: {str(e)}")
+
+
+class ReportCounts(BaseModel):
+    total: int
+    gender: dict
+    status: dict
+    relationship_status: dict
+    attribute_love: dict
+    vibe: dict
+
+
+class ReportsResponse(BaseModel):
+    start_date: Optional[str]
+    end_date: Optional[str]
+    counts: ReportCounts
+
+
+@router.get("/reports/stats", response_model=ReportsResponse)
+def get_reports(
+    start_date: Optional[date] = Query(None, description="Start date (YYYY-MM-DD)"),
+    end_date: Optional[date] = Query(None, description="End date (YYYY-MM-DD)"),
+    db: Session = Depends(get_db),
+    _: str = Depends(get_current_admin)
+):
+    """
+    Get reports/statistics for video jobs within a date range.
+
+    - **start_date**: Start date filter (optional)
+    - **end_date**: End date filter (optional, defaults to today)
+
+    Returns counts for:
+    - Total entries
+    - Gender-wise breakdown
+    - Status-wise breakdown
+    - Relationship status breakdown
+    - Attribute love breakdown
+    - Vibe breakdown
+    """
+    from sqlalchemy import func, case
+
+    # Build date filter
+    filters = []
+    if start_date:
+        filters.append(VideoJob.created_at >= datetime.combine(start_date, datetime.min.time()))
+    if end_date:
+        filters.append(VideoJob.created_at <= datetime.combine(end_date, datetime.max.time()))
+
+    # Base query with filters
+    base_query = db.query(VideoJob)
+    if filters:
+        base_query = base_query.filter(and_(*filters))
+
+    # Total count
+    total = base_query.count()
+
+    # Gender counts
+    gender_counts = db.query(
+        VideoJob.gender,
+        func.count(VideoJob.id).label('count')
+    )
+    if filters:
+        gender_counts = gender_counts.filter(and_(*filters))
+    gender_counts = gender_counts.group_by(VideoJob.gender).all()
+    gender_dict = {g or "unspecified": c for g, c in gender_counts}
+
+    # Status counts
+    status_counts = db.query(
+        VideoJob.status,
+        func.count(VideoJob.id).label('count')
+    )
+    if filters:
+        status_counts = status_counts.filter(and_(*filters))
+    status_counts = status_counts.group_by(VideoJob.status).all()
+    status_dict = {s or "unknown": c for s, c in status_counts}
+
+    # Relationship status counts
+    relationship_counts = db.query(
+        VideoJob.relationship_status,
+        func.count(VideoJob.id).label('count')
+    )
+    if filters:
+        relationship_counts = relationship_counts.filter(and_(*filters))
+    relationship_counts = relationship_counts.group_by(VideoJob.relationship_status).all()
+    relationship_dict = {r or "unknown": c for r, c in relationship_counts}
+
+    # Attribute love counts
+    attribute_counts = db.query(
+        VideoJob.attribute_love,
+        func.count(VideoJob.id).label('count')
+    )
+    if filters:
+        attribute_counts = attribute_counts.filter(and_(*filters))
+    attribute_counts = attribute_counts.group_by(VideoJob.attribute_love).all()
+    attribute_dict = {a or "unknown": c for a, c in attribute_counts}
+
+    # Vibe counts
+    vibe_counts = db.query(
+        VideoJob.vibe,
+        func.count(VideoJob.id).label('count')
+    )
+    if filters:
+        vibe_counts = vibe_counts.filter(and_(*filters))
+    vibe_counts = vibe_counts.group_by(VideoJob.vibe).all()
+    vibe_dict = {v or "unknown": c for v, c in vibe_counts}
+
+    return ReportsResponse(
+        start_date=str(start_date) if start_date else None,
+        end_date=str(end_date) if end_date else None,
+        counts=ReportCounts(
+            total=total,
+            gender=gender_dict,
+            status=status_dict,
+            relationship_status=relationship_dict,
+            attribute_love=attribute_dict,
+            vibe=vibe_dict
+        )
+    )
+
+
+@router.get("/reports/csv")
+def download_reports_csv(
+    start_date: Optional[date] = Query(None, description="Start date (YYYY-MM-DD)"),
+    end_date: Optional[date] = Query(None, description="End date (YYYY-MM-DD)"),
+    db: Session = Depends(get_db),
+    _: str = Depends(get_current_admin)
+):
+    """
+    Download reports as CSV file.
+
+    - **start_date**: Start date filter (optional)
+    - **end_date**: End date filter (optional, defaults to today)
+    """
+    from fastapi.responses import StreamingResponse
+    from sqlalchemy import func
+    import io
+    import csv
+
+    # Build date filter
+    filters = []
+    if start_date:
+        filters.append(VideoJob.created_at >= datetime.combine(start_date, datetime.min.time()))
+    if end_date:
+        filters.append(VideoJob.created_at <= datetime.combine(end_date, datetime.max.time()))
+
+    # Base query with filters
+    base_query = db.query(VideoJob)
+    if filters:
+        base_query = base_query.filter(and_(*filters))
+
+    # Total count
+    total = base_query.count()
+
+    # Gender counts
+    gender_counts = db.query(VideoJob.gender, func.count(VideoJob.id).label('count'))
+    if filters:
+        gender_counts = gender_counts.filter(and_(*filters))
+    gender_counts = gender_counts.group_by(VideoJob.gender).all()
+
+    # Status counts
+    status_counts = db.query(VideoJob.status, func.count(VideoJob.id).label('count'))
+    if filters:
+        status_counts = status_counts.filter(and_(*filters))
+    status_counts = status_counts.group_by(VideoJob.status).all()
+
+    # Relationship status counts
+    relationship_counts = db.query(VideoJob.relationship_status, func.count(VideoJob.id).label('count'))
+    if filters:
+        relationship_counts = relationship_counts.filter(and_(*filters))
+    relationship_counts = relationship_counts.group_by(VideoJob.relationship_status).all()
+
+    # Attribute love counts
+    attribute_counts = db.query(VideoJob.attribute_love, func.count(VideoJob.id).label('count'))
+    if filters:
+        attribute_counts = attribute_counts.filter(and_(*filters))
+    attribute_counts = attribute_counts.group_by(VideoJob.attribute_love).all()
+
+    # Vibe counts
+    vibe_counts = db.query(VideoJob.vibe, func.count(VideoJob.id).label('count'))
+    if filters:
+        vibe_counts = vibe_counts.filter(and_(*filters))
+    vibe_counts = vibe_counts.group_by(VideoJob.vibe).all()
+
+    # Create CSV in memory
+    output = io.StringIO()
+    writer = csv.writer(output)
+
+    # Write header
+    writer.writerow(["Category", "Type", "Count"])
+
+    # Write total
+    writer.writerow(["Total", "entries", total])
+
+    # Write gender breakdown
+    for gender, count in gender_counts:
+        writer.writerow(["Gender", gender or "unspecified", count])
+
+    # Write status breakdown
+    for status, count in status_counts:
+        writer.writerow(["Status", status or "unknown", count])
+
+    # Write relationship breakdown
+    for rel, count in relationship_counts:
+        writer.writerow(["Relationship", rel or "unknown", count])
+
+    # Write attribute love breakdown
+    for attr, count in attribute_counts:
+        writer.writerow(["Attribute Love", attr or "unknown", count])
+
+    # Write vibe breakdown
+    for vibe, count in vibe_counts:
+        writer.writerow(["Vibe", vibe or "unknown", count])
+
+    # Prepare response
+    output.seek(0)
+    date_suffix = ""
+    if start_date and end_date:
+        date_suffix = f"_{start_date}_to_{end_date}"
+    elif start_date:
+        date_suffix = f"_from_{start_date}"
+    elif end_date:
+        date_suffix = f"_until_{end_date}"
+
+    filename = f"video_jobs_report{date_suffix}.csv"
+
+    return StreamingResponse(
+        iter([output.getvalue()]),
+        media_type="text/csv",
+        headers={"Content-Disposition": f"attachment; filename={filename}"}
+    )
