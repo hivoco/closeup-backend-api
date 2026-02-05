@@ -16,7 +16,7 @@ import httpx
 from app.core.redis import GroqKeyManager, PhotoValidationQueue
 from app.core.config import settings
 
-GROQ_MODEL = "meta-llama/llama-4-scout-17b-16e-instruct"
+GROQ_MODEL = "meta-llama/llama-4-maverick-17b-128e-instruct"
 
 SYSTEM_PROMPT = """You are an EXTREMELY STRICT image moderation system for a close-up romantic video product.
 Analyze the image and classify it into ONE category ONLY.
