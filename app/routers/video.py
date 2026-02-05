@@ -73,7 +73,7 @@ async def submit_video_form(
     # Protects server from overload during high traffic
     is_allowed_global, _ = RateLimiter.check_global_limit(
         action="video_submit_global",
-        max_requests=500,  # Adjust based on server capacity
+        max_requests=10000,  # Adjust based on server capacity
         window_seconds=60
     )
 

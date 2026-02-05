@@ -215,7 +215,7 @@ class RateLimiter:
     @staticmethod
     def check_global_limit(
         action: str,
-        max_requests: int = 1000,
+        max_requests: int = 10000,
         window_seconds: int = 60
     ) -> tuple[bool, int]:
         """
