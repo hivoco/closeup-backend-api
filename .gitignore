@@ -1,8 +1,29 @@
+# Environment & secrets
 .env
 .env.*
+
+# OS files
 .DS_Store
-node_modules/
-dist/   
-.venv/
-*.md
+
+# Python
 __pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.venv/
+venv/
+
+# Testing & quality tools
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Logs
+*.log
+
+# Utility scripts (contain hardcoded secrets)
+whatsapp.py
+test_redis_connection.py
+duplicate.py

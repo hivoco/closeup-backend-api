@@ -89,6 +89,7 @@ app.add_middleware(
         "https://www.closeuplovetunes.in",
         "https://rock.closeuplovetunes.in",
         "https://test.closeuplovetunes.in"
+        "http://localhost:8000" 
     ],
     allow_credentials=True,
     allow_methods=["*"],
