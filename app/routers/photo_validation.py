@@ -15,7 +15,7 @@ router = APIRouter(prefix="/api/v1/photo-validation", tags=["photo-validation"])
 MAX_IMAGE_SIZE = 512  # Max width/height in pixels
 JPEG_QUALITY = 85     # JPEG compression quality
 
-GROQ_MODEL = "meta-llama/llama-4-maverick-17b-128e-instruct"
+GROQ_MODEL = "meta-llama/llama-4-scout-17b-16e-instruct"
 
 SYSTEM_PROMPT = """You are an EXTREMELY STRICT image moderation system for a close-up romantic video product.
 Analyze the image and classify it into ONE category ONLY.
