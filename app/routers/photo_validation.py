@@ -3,11 +3,52 @@ from typing import Optional, Literal
 import httpx
 import base64
 import io
+import hmac
+import hashlib
+import time
 from uuid import uuid4
 from PIL import Image
 from pydantic import BaseModel
 from app.core.config import settings
 from app.core.redis import GroqKeyManager, PhotoValidationQueue
+
+VALIDATION_TOKEN_EXPIRY = 600  # 10 minutes
+
+
+def generate_validation_token(photo_hash: str) -> str:
+    """Generate an HMAC-signed token proving photo was validated."""
+    timestamp = str(int(time.time()))
+    payload = f"{photo_hash}:{timestamp}"
+    signature = hmac.new(
+        settings.JWT_SECRET_KEY.encode(),
+        payload.encode(),
+        hashlib.sha256
+    ).hexdigest()
+    token = base64.urlsafe_b64encode(f"{payload}:{signature}".encode()).decode()
+    return token
+
+
+def verify_validation_token(token: str) -> bool:
+    """Verify the HMAC-signed validation token."""
+    try:
+        decoded = base64.urlsafe_b64decode(token.encode()).decode()
+        parts = decoded.split(":")
+        if len(parts) != 3:
+            return False
+        photo_hash, timestamp, signature = parts
+        # Check expiry
+        if int(time.time()) - int(timestamp) > VALIDATION_TOKEN_EXPIRY:
+            return False
+        # Verify signature
+        payload = f"{photo_hash}:{timestamp}"
+        expected = hmac.new(
+            settings.JWT_SECRET_KEY.encode(),
+            payload.encode(),
+            hashlib.sha256
+        ).hexdigest()
+        return hmac.compare_digest(signature, expected)
+    except Exception:
+        return False
 
 router = APIRouter(prefix="/api/v1/photo-validation", tags=["photo-validation"])
 
@@ -50,6 +91,11 @@ REJECT_HAZY – Photo is hazy, foggy, or unclear:
 - Low light, dark, or overexposed photo where face details are lost
 - Steam, smoke, or any visual obstruction causing haziness
 
+REJECT_CELEBRITY – Celebrity or public figure detected:
+- Any recognizable celebrity, actor, actress, politician, sports star, influencer, or public personality
+- Famous faces from movies, TV, music, politics, sports, or social media
+- If the person looks like a well-known personality, REJECT as celebrity
+
 REJECT_INVALID – Image unsuitable for face video generation:
 - HANDS OR FINGERS touching, covering, or near the face (even partially)
 - Any object obscuring the face (phone, food, drink, pen, etc.)
@@ -62,7 +108,6 @@ REJECT_INVALID – Image unsuitable for face video generation:
 - Sunglasses, masks, helmets, hats covering face
 - Hair covering significant part of face (eyes, nose, or mouth)
 - Child or minor
-- Celebrity or public figure
 - Unusual expressions (tongue out, eyes closed, making faces)
 
 APPROVED – ONLY if ALL conditions are met:
@@ -81,6 +126,7 @@ CRITICAL RULES:
 - If camera angle is from below face level → REJECT_ANGLE_LOW
 - If camera angle is from above face level → REJECT_ANGLE_HIGH
 - If image is hazy, blurry, foggy, or unclear → REJECT_HAZY
+- If person looks like a celebrity or famous personality → REJECT_CELEBRITY
 - Return ONLY one word:
 
 REJECT_RELIGIOUS
@@ -88,10 +134,11 @@ REJECT_NSFW
 REJECT_ANGLE_LOW
 REJECT_ANGLE_HIGH
 REJECT_HAZY
+REJECT_CELEBRITY
 REJECT_INVALID
 APPROVED"""
 
-ImageLabel = Literal["REJECT_RELIGIOUS", "REJECT_NSFW", "REJECT_ANGLE_LOW", "REJECT_ANGLE_HIGH", "REJECT_HAZY", "REJECT_INVALID", "APPROVED"]
+ImageLabel = Literal["REJECT_RELIGIOUS", "REJECT_NSFW", "REJECT_ANGLE_LOW", "REJECT_ANGLE_HIGH", "REJECT_HAZY", "REJECT_CELEBRITY", "REJECT_INVALID", "APPROVED"]
 
 
 class Usage(BaseModel):
@@ -106,6 +153,7 @@ class ValidationResponse(BaseModel):
     message: Optional[str] = None
     label: Optional[ImageLabel] = None
     usage: Optional[Usage] = None
+    validation_token: Optional[str] = None
 
 
 def get_reason_for_label(label: ImageLabel) -> str:
@@ -115,6 +163,7 @@ def get_reason_for_label(label: ImageLabel) -> str:
         "REJECT_ANGLE_LOW": "Your camera is too low. Please hold your phone at face level and take a straight photo.",
         "REJECT_ANGLE_HIGH": "Your camera is too high. Please hold your phone at face level and take a straight photo.",
         "REJECT_HAZY": "Your photo is not clear. Please clean your camera lens and take the photo in good lighting.",
+        "REJECT_CELEBRITY": "This looks like a celebrity or public figure. Please upload your own photo to create your personalized video!",
         "REJECT_INVALID": "Photo does not meet requirements. Please upload a clear, front-facing selfie with only your face visible.",
         "APPROVED": "Photo validated successfully!"
     }
@@ -290,11 +339,15 @@ async def check_photo(photo: UploadFile = File(...)):
             # Check if approved
             if label == "APPROVED":
                 print("✅ Photo APPROVED")
+                # Generate validation token from photo hash
+                photo_hash = hashlib.sha256(resized_bytes).hexdigest()
+                token = generate_validation_token(photo_hash)
                 return ValidationResponse(
                     valid=True,
                     message=get_reason_for_label(label),
                     label=label,
-                    usage=usage
+                    usage=usage,
+                    validation_token=token
                 )
 
             # Rejected

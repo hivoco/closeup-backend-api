@@ -13,6 +13,7 @@ from app.core.config import settings
 from app.core.s3 import upload_fileobj_to_s3
 from app.core.timezone import get_ist_now
 from app.core.redis import RateLimiter, Cache
+from app.routers.photo_validation import verify_validation_token
 
 from app.models.user import User
 from app.models.user_verification import UserVerification
@@ -67,6 +68,7 @@ async def submit_video_form(
     vibe: str = Form(...),
     terms_accepted: bool = Form(...),
     photo: UploadFile = File(...),
+    validation_token: str = Form(...),
     db: Session = Depends(get_db),
 ):
     # Global rate limit: max 10000 requests/minute for entire API (all users)
@@ -98,6 +100,13 @@ async def submit_video_form(
             status_code=429,
             detail=f"Too many requests. Please try again in {retry_after} seconds.",
             headers={"Retry-After": str(retry_after)}
+        )
+
+    # Verify photo validation token
+    if not verify_validation_token(validation_token):
+        raise HTTPException(
+            status_code=400,
+            detail="Photo validation required. Please validate your photo before submitting."
         )
 
     # Validate mobile number
