@@ -69,7 +69,7 @@ async def submit_video_form(
     photo: UploadFile = File(...),
     db: Session = Depends(get_db),
 ):
-    # Global rate limit: max 500 requests/minute for entire API (all users)
+    # Global rate limit: max 10000 requests/minute for entire API (all users)
     # Protects server from overload during high traffic
     is_allowed_global, _ = RateLimiter.check_global_limit(
         action="video_submit_global",

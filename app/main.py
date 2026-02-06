@@ -90,6 +90,7 @@ app.add_middleware(
         "https://rock.closeuplovetunes.in",
         "https://test.closeuplovetunes.in"
     ],
+    
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

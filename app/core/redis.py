@@ -222,7 +222,7 @@ class RateLimiter:
         Global rate limit for entire API (all users combined).
         Use this to protect server from overload.
 
-        Example: max 1000 requests/minute for video_submit
+        Example: max 10000 requests/minute for video_submit
         """
         return RateLimiter.check_rate_limit(
             identifier="global",

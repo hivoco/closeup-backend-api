@@ -746,6 +746,9 @@ def send_video_whatsapp(
 
 class ReportCounts(BaseModel):
     total: int
+    unique_users: int
+    new_users: int
+    returning_users: int
     gender: dict
     status: dict
     relationship_status: dict
@@ -796,6 +799,30 @@ def get_reports(
 
     # Total count
     total = base_query.count()
+
+    # Unique users count (distinct user_ids in filtered jobs)
+    unique_users = db.query(func.count(func.distinct(VideoJob.user_id)))
+    if filters:
+        unique_users = unique_users.filter(and_(*filters))
+    unique_users = unique_users.scalar() or 0
+
+    # New users vs Returning users
+    # New user = user with video_count == 1 (first video)
+    # Returning user = user with video_count > 1
+    user_ids_in_range = db.query(func.distinct(VideoJob.user_id))
+    if filters:
+        user_ids_in_range = user_ids_in_range.filter(and_(*filters))
+    user_ids_in_range = user_ids_in_range.subquery()
+
+    new_users = db.query(func.count(User.id)).filter(
+        User.id.in_(user_ids_in_range),
+        User.video_count == 1
+    ).scalar() or 0
+
+    returning_users = db.query(func.count(User.id)).filter(
+        User.id.in_(user_ids_in_range),
+        User.video_count > 1
+    ).scalar() or 0
 
     # Gender counts
     gender_counts = db.query(
@@ -852,6 +879,9 @@ def get_reports(
         end_date=str(end_date) if end_date else None,
         counts=ReportCounts(
             total=total,
+            unique_users=unique_users,
+            new_users=new_users,
+            returning_users=returning_users,
             gender=gender_dict,
             status=status_dict,
             relationship_status=relationship_dict,
@@ -894,6 +924,28 @@ def download_reports_csv(
     # Total count
     total = base_query.count()
 
+    # Unique users count
+    unique_users = db.query(func.count(func.distinct(VideoJob.user_id)))
+    if filters:
+        unique_users = unique_users.filter(and_(*filters))
+    unique_users = unique_users.scalar() or 0
+
+    # New users vs Returning users
+    user_ids_in_range = db.query(func.distinct(VideoJob.user_id))
+    if filters:
+        user_ids_in_range = user_ids_in_range.filter(and_(*filters))
+    user_ids_in_range = user_ids_in_range.subquery()
+
+    new_users = db.query(func.count(User.id)).filter(
+        User.id.in_(user_ids_in_range),
+        User.video_count == 1
+    ).scalar() or 0
+
+    returning_users = db.query(func.count(User.id)).filter(
+        User.id.in_(user_ids_in_range),
+        User.video_count > 1
+    ).scalar() or 0
+
     # Gender counts
     gender_counts = db.query(VideoJob.gender, func.count(VideoJob.id).label('count'))
     if filters:
@@ -933,6 +985,9 @@ def download_reports_csv(
 
     # Write total
     writer.writerow(["Total", "entries", total])
+    writer.writerow(["Users", "unique_users", unique_users])
+    writer.writerow(["Users", "new_users", new_users])
+    writer.writerow(["Users", "returning_users", returning_users])
 
     # Write gender breakdown
     for gender, count in gender_counts:
