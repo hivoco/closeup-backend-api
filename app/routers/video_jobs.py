@@ -887,6 +887,125 @@ def get_reports(
     )
 
 
+class TrendDataPoint(BaseModel):
+    label: str
+    total_entries: int
+    total_users: int
+    returning_users: int
+
+
+class TrendResponse(BaseModel):
+    mode: str  # "day" or "week"
+    data: List[TrendDataPoint]
+
+
+@router.get("/reports/trend", response_model=TrendResponse)
+def get_reports_trend(
+    mode: str = Query("day", description="Trend mode: 'day' or 'week'"),
+    start_date: Optional[date] = Query(None, description="Start date (YYYY-MM-DD)"),
+    end_date: Optional[date] = Query(None, description="End date (YYYY-MM-DD)"),
+    db: Session = Depends(get_db),
+    _: str = Depends(get_current_admin)
+):
+    """
+    Get day-wise or week-wise trend data for total entries, total users, returning users.
+    """
+    from sqlalchemy import func
+    from datetime import timedelta
+
+    # Default date range
+    if not end_date:
+        end_date = date.today()
+    if not start_date:
+        start_date = end_date - timedelta(days=29)  # Last 30 days
+
+    start_dt = datetime.combine(start_date, datetime.min.time())
+    end_dt = datetime.combine(end_date, datetime.max.time())
+
+    if mode == "week":
+        # Week-wise: group by YEARWEEK
+        # Get all jobs in range grouped by week
+        entries_by_week = db.query(
+            func.yearweek(VideoJob.created_at, 1).label('yw'),
+            func.min(func.date(VideoJob.created_at)).label('week_start'),
+            func.count(VideoJob.id).label('total_entries'),
+            func.count(func.distinct(VideoJob.user_id)).label('total_users')
+        ).filter(
+            VideoJob.created_at >= start_dt,
+            VideoJob.created_at <= end_dt
+        ).group_by('yw').order_by('yw').all()
+
+        # Get returning users per week (users with 2+ jobs overall who appear in that week)
+        jobs_per_user = db.query(
+            VideoJob.user_id,
+            func.count(VideoJob.id).label('total_jobs')
+        ).group_by(VideoJob.user_id).subquery()
+
+        returning_by_week = db.query(
+            func.yearweek(VideoJob.created_at, 1).label('yw'),
+            func.count(func.distinct(VideoJob.user_id)).label('returning_count')
+        ).join(
+            jobs_per_user, jobs_per_user.c.user_id == VideoJob.user_id
+        ).filter(
+            VideoJob.created_at >= start_dt,
+            VideoJob.created_at <= end_dt,
+            jobs_per_user.c.total_jobs > 1
+        ).group_by('yw').all()
+
+        returning_map = {str(r.yw): r.returning_count for r in returning_by_week}
+
+        data = []
+        for row in entries_by_week:
+            yw_key = str(row.yw)
+            data.append(TrendDataPoint(
+                label=f"Week of {row.week_start.strftime('%d %b')}",
+                total_entries=row.total_entries,
+                total_users=row.total_users,
+                returning_users=returning_map.get(yw_key, 0)
+            ))
+    else:
+        # Day-wise
+        entries_by_day = db.query(
+            func.date(VideoJob.created_at).label('day'),
+            func.count(VideoJob.id).label('total_entries'),
+            func.count(func.distinct(VideoJob.user_id)).label('total_users')
+        ).filter(
+            VideoJob.created_at >= start_dt,
+            VideoJob.created_at <= end_dt
+        ).group_by('day').order_by('day').all()
+
+        # Get returning users per day
+        jobs_per_user = db.query(
+            VideoJob.user_id,
+            func.count(VideoJob.id).label('total_jobs')
+        ).group_by(VideoJob.user_id).subquery()
+
+        returning_by_day = db.query(
+            func.date(VideoJob.created_at).label('day'),
+            func.count(func.distinct(VideoJob.user_id)).label('returning_count')
+        ).join(
+            jobs_per_user, jobs_per_user.c.user_id == VideoJob.user_id
+        ).filter(
+            VideoJob.created_at >= start_dt,
+            VideoJob.created_at <= end_dt,
+            jobs_per_user.c.total_jobs > 1
+        ).group_by('day').all()
+
+        returning_map = {str(r.day): r.returning_count for r in returning_by_day}
+
+        data = []
+        for row in entries_by_day:
+            day_key = str(row.day)
+            data.append(TrendDataPoint(
+                label=row.day.strftime('%d %b'),
+                total_entries=row.total_entries,
+                total_users=row.total_users,
+                returning_users=returning_map.get(day_key, 0)
+            ))
+
+    return TrendResponse(mode=mode, data=data)
+
+
 @router.get("/reports/csv")
 def download_reports_csv(
     start_date: Optional[date] = Query(None, description="Start date (YYYY-MM-DD)"),
