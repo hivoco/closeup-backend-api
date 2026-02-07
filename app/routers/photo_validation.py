@@ -56,89 +56,12 @@ router = APIRouter(prefix="/api/v1/photo-validation", tags=["photo-validation"])
 MAX_IMAGE_SIZE = 512  # Max width/height in pixels
 JPEG_QUALITY = 85     # JPEG compression quality
 
-GROQ_MODEL = "meta-llama/llama-4-scout-17b-16e-instruct"
+GROQ_PRIMARY_MODEL = "meta-llama/llama-4-scout-17b-16e-instruct"
+GROQ_FALLBACK_MODEL = "meta-llama/llama-4-maverick-17b-128e-instruct"
 
-SYSTEM_PROMPT = """You are an EXTREMELY STRICT image moderation system for a close-up romantic video product.
-Analyze the image and classify it into ONE category ONLY.
+SYSTEM_PROMPT = """Classify image: REJECT_UNCLEAR (blurry/foggy/dark), REJECT_CELEBRITY (famous person), REJECT_OBSTRUCTED (fingers/hands/objects/mask/hair on face, multiple/no faces), REJECT_NSFW (nudity/sexual), APPROVED (clear unobstructed non-celebrity face). Reply ONE word only."""
 
-REJECT_RELIGIOUS – ANY religious elements:
-- Religious symbols (cross, crescent, om, etc.)
-- Religious clothing (hijab, niqab, skullcap, robes)
-- EXCEPTION: Turbans/pagris, tilak, bindi, rosary, and burka (if face is clearly visible) are ALLOWED and should NOT be rejected
-- Places of worship, religious text, idols, prayer gestures
-
-REJECT_NSFW – ANY inappropriate content:
-- Nudity, partial nudity, cleavage emphasis
-- Sexual or seductive poses
-- Bedroom/intimate scenes, lingerie, towel-only
-
-REJECT_ANGLE_LOW – Camera is held too LOW (below face level):
-- Face is angled downward / chin is tucked
-- Camera is looking UP at the person from below
-- Nostrils or underside of chin are prominently visible
-- Person appears to be looking down at the camera
-
-REJECT_ANGLE_HIGH – Camera is held too HIGH (above face level):
-- Face is angled upward / chin is raised
-- Camera is looking DOWN at the person from above
-- Top of head or forehead is overly prominent
-- Person appears to be looking up at the camera
-
-REJECT_HAZY – Photo is hazy, foggy, or unclear:
-- Image looks hazy, foggy, or has a misty appearance
-- Blurry or out-of-focus photo where facial features are not sharp
-- Dirty or smudged camera lens causing unclear image
-- Low light, dark, or overexposed photo where face details are lost
-- Steam, smoke, or any visual obstruction causing haziness
-
-REJECT_CELEBRITY – Celebrity or public figure detected:
-- Any recognizable celebrity, actor, actress, politician, sports star, influencer, or public personality
-- Famous faces from movies, TV, music, politics, sports, or social media
-- If the person looks like a well-known personality, REJECT as celebrity
-
-REJECT_INVALID – Image unsuitable for face video generation:
-- HANDS OR FINGERS touching, covering, or near the face (even partially)
-- Any object obscuring the face (phone, food, drink, pen, etc.)
-- Face not 100% clearly visible and unobstructed
-- Photo of a photo, screenshot, or image on a screen
-- AI-generated, cartoon, anime, illustration, filtered face
-- Multiple people or faces
-- Side profile, tilted head, looking away (must be front-facing)
-- Face too far, too close, cropped, or not centered
-- Sunglasses, masks, helmets, hats covering face
-- Hair covering significant part of face (eyes, nose, or mouth)
-- Child or minor
-- Unusual expressions (tongue out, eyes closed, making faces)
-
-APPROVED – ONLY if ALL conditions are met:
-- ONE real adult human face, clearly visible
-- Face is 100% unobstructed (NO hands, fingers, objects, hair blocking)
-- Front-facing, looking directly at camera, eyes open
-- Camera is at face level (straight on, not from above or below)
-- Clear, well-lit, sharp image quality
-- Natural expression (neutral or slight smile)
-- No religious, NSFW, or invalid elements
-
-CRITICAL RULES:
-- Be EXTREMELY strict. When in doubt, REJECT.
-- If ANY part of face is covered by hands/fingers → REJECT_INVALID
-- If face is not perfectly clear and visible → REJECT_INVALID
-- If camera angle is from below face level → REJECT_ANGLE_LOW
-- If camera angle is from above face level → REJECT_ANGLE_HIGH
-- If image is hazy, blurry, foggy, or unclear → REJECT_HAZY
-- If person looks like a celebrity or famous personality → REJECT_CELEBRITY
-- Return ONLY one word:
-
-REJECT_RELIGIOUS
-REJECT_NSFW
-REJECT_ANGLE_LOW
-REJECT_ANGLE_HIGH
-REJECT_HAZY
-REJECT_CELEBRITY
-REJECT_INVALID
-APPROVED"""
-
-ImageLabel = Literal["REJECT_RELIGIOUS", "REJECT_NSFW", "REJECT_ANGLE_LOW", "REJECT_ANGLE_HIGH", "REJECT_HAZY", "REJECT_CELEBRITY", "REJECT_INVALID", "APPROVED"]
+ImageLabel = Literal["REJECT_UNCLEAR", "REJECT_CELEBRITY", "REJECT_OBSTRUCTED", "REJECT_NSFW", "APPROVED"]
 
 
 class Usage(BaseModel):
@@ -158,13 +81,10 @@ class ValidationResponse(BaseModel):
 
 def get_reason_for_label(label: ImageLabel) -> str:
     reasons = {
-        "REJECT_RELIGIOUS": "Photo does not meet requirements. Please upload a clear, front-facing selfie with only your face visible.",
-        "REJECT_NSFW": "Inappropriate or NSFW content detected. Please upload an appropriate photo.",
-        "REJECT_ANGLE_LOW": "Your camera is too low. Please hold your phone at face level and take a straight photo.",
-        "REJECT_ANGLE_HIGH": "Your camera is too high. Please hold your phone at face level and take a straight photo.",
-        "REJECT_HAZY": "Your photo is not clear. Please clean your camera lens and take the photo in good lighting.",
-        "REJECT_CELEBRITY": "This looks like a celebrity or public figure. Please upload your own photo to create your personalized video!",
-        "REJECT_INVALID": "Photo does not meet requirements. Please upload a clear, front-facing selfie with only your face visible.",
+        "REJECT_UNCLEAR": "Your photo is not clear. Please take a sharp photo in good lighting.",
+        "REJECT_CELEBRITY": "This looks like a celebrity or public figure. Please upload your own photo!",
+        "REJECT_OBSTRUCTED": "Your face is not fully visible. Please remove any obstructions and show your full face clearly.",
+        "REJECT_NSFW": "Inappropriate content detected. Please upload an appropriate photo.",
         "APPROVED": "Photo validated successfully!"
     }
     return reasons.get(label, "Image validation failed. Please try again.")
@@ -237,22 +157,6 @@ async def check_photo(photo: UploadFile = File(...)):
         - usage: Token usage statistics
     """
 
-    # Get available API key (round-robin with failover)
-    key_result = GroqKeyManager.get_available_key()
-
-    if not key_result:
-        # All keys exhausted - return rate limit response
-        retry_after = GroqKeyManager.get_retry_after()
-        remaining = GroqKeyManager.get_total_remaining()
-        print(f"⚠️ All Groq API keys at limit. Retry after {retry_after}s (remaining: {remaining})")
-        raise HTTPException(
-            status_code=429,
-            detail=f"Service is busy. Please try again in {retry_after} seconds.",
-            headers={"Retry-After": str(retry_after)}
-        )
-
-    api_key, key_index = key_result
-
     print(f"📸 Received photo: {photo.filename}, Content-Type: {photo.content_type}")
 
     # Validate file type
@@ -284,100 +188,105 @@ async def check_photo(photo: UploadFile = File(...)):
     # Create data URL for Groq API
     data_url = to_data_url(resized_bytes, mime_type)
 
-    # Call Groq API with selected key
-    try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            response = await client.post(
-                "https://api.groq.com/openai/v1/chat/completions",
-                headers={
-                    "Authorization": f"Bearer {api_key}",
-                    "Content-Type": "application/json",
-                },
-                json={
-                    "model": GROQ_MODEL,
-                    "messages": [
-                        {
-                            "role": "system",
-                            "content": SYSTEM_PROMPT
-                        },
-                        {
-                            "role": "user",
-                            "content": [
-                                {"type": "text", "text": "Classify this image."},
-                                {"type": "image_url", "image_url": {"url": data_url}}
-                            ]
-                        }
-                    ],
-                    "temperature": 0.0,
-                    "max_tokens": 5
-                }
-            )
+    # Build attempts: try scout model with all keys first, then maverick with all keys
+    all_keys = settings.groq_api_keys_list
+    attempts = []
+    for key in all_keys:
+        attempts.append((key, GROQ_PRIMARY_MODEL))
+    for key in all_keys:
+        attempts.append((key, GROQ_FALLBACK_MODEL))
 
-            if response.status_code != 200:
-                error_data = response.json()
-                print(f"❌ Groq API Error: {error_data}")
-                raise HTTPException(
-                    status_code=500,
-                    detail="Image validation service unavailable. Please try again."
+    last_error = None
+
+    for attempt_key, attempt_model in attempts:
+        try:
+            print(f"🔑 Trying model={attempt_model.split('/')[-1]} with key ...{attempt_key[-6:]}")
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.post(
+                    "https://api.groq.com/openai/v1/chat/completions",
+                    headers={
+                        "Authorization": f"Bearer {attempt_key}",
+                        "Content-Type": "application/json",
+                    },
+                    json={
+                        "model": attempt_model,
+                        "messages": [
+                            {
+                                "role": "system",
+                                "content": SYSTEM_PROMPT
+                            },
+                            {
+                                "role": "user",
+                                "content": [
+                                    {"type": "text", "text": "Classify this image."},
+                                    {"type": "image_url", "image_url": {"url": data_url}}
+                                ]
+                            }
+                        ],
+                        "temperature": 0.0,
+                        "max_tokens": 5
+                    }
                 )
 
-            data = response.json()
-            label = data["choices"][0]["message"]["content"].strip().upper().replace(".", "")
+                if response.status_code != 200:
+                    error_data = response.json()
+                    print(f"❌ Groq API Error ({attempt_model.split('/')[-1]}): {error_data}")
+                    last_error = str(error_data)
+                    continue  # Try next attempt
 
-            print(f"🤖 Groq AI Classification: {label}")
+                data = response.json()
+                label = data["choices"][0]["message"]["content"].strip().upper().replace(".", "")
 
-            # Get usage stats
-            usage_data = data.get("usage", {})
-            usage = Usage(
-                prompt_tokens=usage_data.get("prompt_tokens"),
-                completion_tokens=usage_data.get("completion_tokens"),
-                total_tokens=usage_data.get("total_tokens")
-            )
+                print(f"🤖 Groq AI Classification ({attempt_model.split('/')[-1]}): {label}")
 
-            print(f"💰 Token usage: {usage_data.get('total_tokens', 0)} tokens")
+                # Get usage stats
+                usage_data = data.get("usage", {})
+                usage = Usage(
+                    prompt_tokens=usage_data.get("prompt_tokens"),
+                    completion_tokens=usage_data.get("completion_tokens"),
+                    total_tokens=usage_data.get("total_tokens")
+                )
 
-            # Check if approved
-            if label == "APPROVED":
-                print("✅ Photo APPROVED")
-                # Generate validation token from photo hash
-                photo_hash = hashlib.sha256(resized_bytes).hexdigest()
-                token = generate_validation_token(photo_hash)
+                print(f"💰 Token usage: {usage_data.get('total_tokens', 0)} tokens")
+
+                # Check if approved
+                if label == "APPROVED":
+                    print("✅ Photo APPROVED")
+                    photo_hash = hashlib.sha256(resized_bytes).hexdigest()
+                    token = generate_validation_token(photo_hash)
+                    return ValidationResponse(
+                        valid=True,
+                        message=get_reason_for_label(label),
+                        label=label,
+                        usage=usage,
+                        validation_token=token
+                    )
+
+                # Rejected
+                print(f"❌ Photo REJECTED: {label}")
                 return ValidationResponse(
-                    valid=True,
+                    valid=False,
+                    reason=get_reason_for_label(label),
                     message=get_reason_for_label(label),
                     label=label,
-                    usage=usage,
-                    validation_token=token
+                    usage=usage
                 )
 
-            # Rejected
-            print(f"❌ Photo REJECTED: {label}")
-            return ValidationResponse(
-                valid=False,
-                reason=get_reason_for_label(label),
-                message=get_reason_for_label(label),
-                label=label,
-                usage=usage
-            )
+        except (httpx.TimeoutException, httpx.HTTPError) as e:
+            print(f"❌ Request failed ({attempt_model.split('/')[-1]}): {str(e)}")
+            last_error = str(e)
+            continue  # Try next attempt
+        except Exception as e:
+            print(f"❌ Unexpected error ({attempt_model.split('/')[-1]}): {str(e)}")
+            last_error = str(e)
+            continue  # Try next attempt
 
-    except httpx.TimeoutException:
-        print("❌ Groq API Timeout")
-        raise HTTPException(
-            status_code=504,
-            detail="Image validation timed out. Please try again."
-        )
-    except httpx.HTTPError as e:
-        print(f"❌ HTTP Error: {str(e)}")
-        raise HTTPException(
-            status_code=500,
-            detail="Image validation failed. Please try again."
-        )
-    except Exception as e:
-        print(f"❌ Validation error: {str(e)}")
-        raise HTTPException(
-            status_code=500,
-            detail="Image validation failed. Please try again."
-        )
+    # All attempts failed
+    print(f"❌ All attempts failed. Last error: {last_error}")
+    raise HTTPException(
+        status_code=500,
+        detail="Image validation service unavailable. Please try again."
+    )
 
 
 class QueueResponse(BaseModel):
