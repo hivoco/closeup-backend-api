@@ -59,9 +59,9 @@ JPEG_QUALITY = 85     # JPEG compression quality
 GROQ_PRIMARY_MODEL = "meta-llama/llama-4-scout-17b-16e-instruct"
 GROQ_FALLBACK_MODEL = "meta-llama/llama-4-maverick-17b-128e-instruct"
 
-SYSTEM_PROMPT = """Classify image: REJECT_UNCLEAR (blurry/foggy/dark), REJECT_CELEBRITY (famous person), REJECT_OBSTRUCTED (fingers/hands/objects/mask/hair on face, multiple/no faces), REJECT_NSFW (nudity/sexual), APPROVED (clear unobstructed non-celebrity face). Reply ONE word only."""
+SYSTEM_PROMPT = """Classify image: REJECT_UNCLEAR (blurry/foggy/dark), REJECT_CELEBRITY (famous person), REJECT_OBSTRUCTED (fingers/hands/objects/mask/hair on face, multiple/no faces), REJECT_NSFW (nudity/sexual), REJECT_MINOR (child or person under 18), REJECT_SCREENSHOT (photo of a photo/poster/screen/printed image, not a live selfie), APPROVED (clear unobstructed live selfie of an adult non-celebrity). Reply ONE word only."""
 
-ImageLabel = Literal["REJECT_UNCLEAR", "REJECT_CELEBRITY", "REJECT_OBSTRUCTED", "REJECT_NSFW", "APPROVED"]
+ImageLabel = Literal["REJECT_UNCLEAR", "REJECT_CELEBRITY", "REJECT_OBSTRUCTED", "REJECT_NSFW", "REJECT_MINOR", "REJECT_SCREENSHOT", "APPROVED"]
 
 
 class Usage(BaseModel):
@@ -85,6 +85,8 @@ def get_reason_for_label(label: ImageLabel) -> str:
         "REJECT_CELEBRITY": "This looks like a celebrity or public figure. Please upload your own photo!",
         "REJECT_OBSTRUCTED": "Your face is not fully visible. Please remove any obstructions and show your full face clearly.",
         "REJECT_NSFW": "Inappropriate content detected. Please upload an appropriate photo.",
+        "REJECT_MINOR": "You must be 18 or older to use this service. Please upload an adult's photo.",
+        "REJECT_SCREENSHOT": "Please take a live selfie instead of uploading a photo of a photo, poster, or screen.",
         "APPROVED": "Photo validated successfully!"
     }
     return reasons.get(label, "Image validation failed. Please try again.")
