@@ -269,6 +269,41 @@ class Cache:
         )
 
 
+class FeatureFlags:
+    """Runtime feature flags stored in Redis. Default: enabled (True) if key missing."""
+
+    PREFIX = "feature_flag:"
+    AUTO_OFF_SUFFIX = ":auto_off"
+
+    @classmethod
+    def is_enabled(cls, flag_name: str, default: bool = True) -> bool:
+        value = RedisOps.get(f"{cls.PREFIX}{flag_name}")
+        if value is None:
+            return default
+        return value == "1"
+
+    @classmethod
+    def set_flag(cls, flag_name: str, enabled: bool, auto: bool = False) -> bool:
+        """Set flag value. If auto=True, also marks it as auto-disabled by system."""
+        client = get_redis()
+        if not client:
+            return False
+        client.set(f"{cls.PREFIX}{flag_name}", "1" if enabled else "0")
+        auto_off_key = f"{cls.PREFIX}{flag_name}{cls.AUTO_OFF_SUFFIX}"
+        if not enabled and auto:
+            client.set(auto_off_key, "1")
+        elif enabled:
+            # Admin re-enabling clears the auto-off marker
+            client.delete(auto_off_key)
+        return True
+
+    @classmethod
+    def is_auto_off(cls, flag_name: str) -> bool:
+        """Check if flag was auto-disabled by system (not manually by admin)."""
+        auto_off_key = f"{cls.PREFIX}{flag_name}{cls.AUTO_OFF_SUFFIX}"
+        return RedisOps.exists(auto_off_key)
+
+
 class GroqKeyManager:
     """
     Manages multiple Groq API keys with load balancing and automatic failover.

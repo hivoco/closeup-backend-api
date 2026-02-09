@@ -10,7 +10,7 @@ from uuid import uuid4
 from PIL import Image
 from pydantic import BaseModel
 from app.core.config import settings
-from app.core.redis import GroqKeyManager, PhotoValidationQueue
+from app.core.redis import GroqKeyManager, PhotoValidationQueue, FeatureFlags
 
 VALIDATION_TOKEN_EXPIRY = 600  # 10 minutes
 
@@ -283,11 +283,13 @@ async def check_photo(photo: UploadFile = File(...)):
             last_error = str(e)
             continue  # Try next attempt
 
-    # All attempts failed
+    # All attempts failed - auto-disable photo validation until admin re-enables
     print(f"❌ All attempts failed. Last error: {last_error}")
+    print("⚠️ Auto-disabling photo validation due to Groq overload (admin must re-enable)")
+    FeatureFlags.set_flag("photo_validation", False, auto=True)
     raise HTTPException(
-        status_code=500,
-        detail="Image validation service unavailable. Please try again."
+        status_code=503,
+        detail="Image validation service unavailable. Photo validation has been auto-disabled. Please try submitting without photo check."
     )
 
 

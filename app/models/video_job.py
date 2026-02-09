@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, Enum, BigInteger, Integer, DateTime
+from sqlalchemy import Column, String, Enum, BigInteger, Integer, DateTime, Boolean
 from app.core.database import Base
 from app.core.timezone import get_ist_now
 
@@ -22,7 +22,7 @@ class VideoJob(Base):
     ))
 
     status = Column(Enum(
-        "wait","queued","photo_processing","photo_done",
+        "wait","unverified_photo","queued","photo_processing","photo_done",
         "lipsync_processing","lipsync_done",
         "stitching","uploaded","sent","failed"
     ), default="queued")
@@ -32,5 +32,6 @@ class VideoJob(Base):
     locked_at = Column(DateTime, nullable=True)
     failed_stage = Column(Enum("photo","lipsync","stitch","delivery"), nullable=True)
     last_error_code = Column(String(64), nullable=True)
+    photo_validated = Column(Boolean, default=True, nullable=False, server_default="1")
     created_at = Column(DateTime, default=get_ist_now, nullable=False)
     updated_at = Column(DateTime, default=get_ist_now, onupdate=get_ist_now, nullable=False)

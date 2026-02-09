@@ -14,6 +14,7 @@ from app.core.timezone import get_ist_now
 from app.core.config import settings
 from app.core.admin_auth import get_current_admin
 from app.core.otp import send_failed_message
+from app.core.redis import FeatureFlags
 from app.models.video_job import VideoJob
 from app.models.video_assets import VideoAssets
 from app.models.user import User
@@ -41,6 +42,7 @@ class VideoJobResponse(BaseModel):
     locked_at: Optional[datetime] = None
     failed_stage: Optional[str] = None
     last_error_code: Optional[str] = None
+    photo_validated: Optional[bool] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 
@@ -187,6 +189,7 @@ def list_video_jobs(
             "locked_at": job.locked_at,
             "failed_stage": job.failed_stage,
             "last_error_code": job.last_error_code,
+            "photo_validated": job.photo_validated,
             "created_at": job.created_at,
             "updated_at": job.updated_at
         }
@@ -290,6 +293,7 @@ def get_video_job(
         "locked_at": job.locked_at,
         "failed_stage": job.failed_stage,
         "last_error_code": job.last_error_code,
+        "photo_validated": job.photo_validated,
         "created_at": job.created_at,
         "updated_at": job.updated_at,
         "raw_selfie_url": assets.raw_selfie_url if assets else None,
@@ -385,7 +389,7 @@ def update_job_status(
         )
 
     # Validate status
-    valid_statuses = ['wait', 'queued', 'photo_processing', 'photo_done', 'lipsync_processing',
+    valid_statuses = ['wait', 'unverified_photo', 'queued', 'photo_processing', 'photo_done', 'lipsync_processing',
                       'lipsync_done', 'stitching', 'uploaded', 'sent', 'failed']
 
     if status not in valid_statuses:
@@ -458,7 +462,7 @@ def update_job_by_job_id(
         )
 
     # Validate status
-    valid_statuses = ['wait', 'queued', 'photo_processing', 'photo_done', 'lipsync_processing',
+    valid_statuses = ['wait', 'unverified_photo', 'queued', 'photo_processing', 'photo_done', 'lipsync_processing',
                       'lipsync_done', 'stitching', 'uploaded', 'sent', 'failed']
 
     if status not in valid_statuses:
@@ -1140,3 +1144,36 @@ def download_reports_csv(
         media_type="text/csv",
         headers={"Content-Disposition": f"attachment; filename={filename}"}
     )
+
+
+# ── Photo Validation Toggle ──────────────────────────────────────────
+
+class PhotoValidationToggle(BaseModel):
+    enabled: bool
+
+
+@router.get("/settings/photo-validation")
+def get_photo_validation_setting(
+    _: str = Depends(get_current_admin)
+):
+    """Get current photo validation toggle status (admin only)."""
+    enabled = FeatureFlags.is_enabled("photo_validation", default=True)
+    auto_off = FeatureFlags.is_auto_off("photo_validation")
+    return {
+        "enabled": enabled,
+        "auto_off": auto_off,
+    }
+
+
+@router.patch("/settings/photo-validation")
+def set_photo_validation_setting(
+    body: PhotoValidationToggle,
+    _: str = Depends(get_current_admin)
+):
+    """Toggle photo validation ON/OFF (admin only)."""
+    success = FeatureFlags.set_flag("photo_validation", body.enabled)
+    if not success:
+        raise HTTPException(status_code=500, detail="Failed to update setting")
+    # set_flag with enabled=True already clears auto_off marker
+    status = "enabled" if body.enabled else "disabled"
+    return {"enabled": body.enabled, "message": f"Photo validation {status}"}

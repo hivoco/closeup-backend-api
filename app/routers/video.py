@@ -12,7 +12,7 @@ from app.core.otp import generate_otp, hash_otp, send_otp, send_thank_you
 from app.core.config import settings
 from app.core.s3 import upload_fileobj_to_s3
 from app.core.timezone import get_ist_now
-from app.core.redis import RateLimiter, Cache
+from app.core.redis import RateLimiter, Cache, FeatureFlags
 from app.routers.photo_validation import verify_validation_token
 
 from app.models.user import User
@@ -68,7 +68,7 @@ async def submit_video_form(
     vibe: str = Form(...),
     terms_accepted: bool = Form(...),
     photo: UploadFile = File(...),
-    validation_token: str = Form(...),
+    validation_token: str = Form(""),
     db: Session = Depends(get_db),
 ):
     # Global rate limit: max 10000 requests/minute for entire API (all users)
@@ -102,12 +102,13 @@ async def submit_video_form(
             headers={"Retry-After": str(retry_after)}
         )
 
-    # Verify photo validation token
-    if not verify_validation_token(validation_token):
-        raise HTTPException(
-            status_code=400,
-            detail="Photo validation required. Please validate your photo before submitting."
-        )
+    # Verify photo validation token (skip if admin turned it off)
+    if FeatureFlags.is_enabled("photo_validation", default=True):
+        if not verify_validation_token(validation_token):
+            raise HTTPException(
+                status_code=400,
+                detail="Photo validation required. Please validate your photo before submitting."
+            )
 
     # Validate mobile number
     if not mobile_number or len(mobile_number.strip()) < 10:
@@ -278,6 +279,7 @@ async def submit_video_form(
                 attribute_love=attribute_love,
                 vibe=vibe,
                 status="wait",  # Will change to "queued" after OTP verification
+                photo_validated=FeatureFlags.is_enabled("photo_validation", default=True),
             )
             db.add(job)
             db.flush()
@@ -344,6 +346,7 @@ async def submit_video_form(
         }
 
     # No pending job - create new one
+    photo_validation_on = FeatureFlags.is_enabled("photo_validation", default=True)
     try:
         job = VideoJob(
             user_id=user.id,
@@ -351,7 +354,8 @@ async def submit_video_form(
             relationship_status=relationship_status,
             attribute_love=attribute_love,
             vibe=vibe,
-            status="queued",
+            status="queued" if photo_validation_on else "unverified_photo",
+            photo_validated=photo_validation_on,
         )
         db.add(job)
         db.flush()

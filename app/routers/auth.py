@@ -106,8 +106,9 @@ def verify_otp(payload: dict, db: Session = Depends(get_db)):
     ).first()
 
     if waiting_job:
-        # Change status from "wait" to "queued" - now the job can be processed
-        waiting_job.status = "queued"
+        # If photo was not validated, go to unverified_photo; otherwise queued
+        next_status = "unverified_photo" if waiting_job.photo_validated is False else "queued"
+        waiting_job.status = next_status
         waiting_job.updated_at = get_ist_now()
         user.video_count += 1
         db.commit()
@@ -115,7 +116,7 @@ def verify_otp(payload: dict, db: Session = Depends(get_db)):
         # Cache the pending video job
         Cache.set_pending_video(user.id, str(waiting_job.id))
 
-        print(f"✅ Job {waiting_job.id} status changed: wait → queued")
+        print(f"✅ Job {waiting_job.id} status changed: wait → {next_status}")
 
         # Send thank you WhatsApp message
         try:

@@ -102,6 +102,14 @@ def health_check():
     return {"status": True}
 
 
+@app.get("/api/v1/settings/photo-validation-status")
+def photo_validation_status():
+    """Public endpoint: check if photo validation is required (no auth needed)."""
+    from app.core.redis import FeatureFlags
+    enabled = FeatureFlags.is_enabled("photo_validation", default=True)
+    return {"enabled": enabled}
+
+
 app.include_router(video.router)
 app.include_router(auth.router)
 app.include_router(photo_validation.router)
