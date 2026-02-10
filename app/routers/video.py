@@ -67,6 +67,7 @@ async def submit_video_form(
     attribute_love: str = Form(...),
     vibe: str = Form(...),
     terms_accepted: bool = Form(...),
+    marketing_opt_in: bool = Form(False),
     photo: UploadFile = File(...),
     validation_token: str = Form(""),
     db: Session = Depends(get_db),
@@ -214,18 +215,14 @@ async def submit_video_form(
             phone_encrypted=encrypt_phone(mobile_number),
             video_count=0,
             terms_accepted=terms_accepted,
+            marketing_opt_in=marketing_opt_in,
         )
         db.add(user)
-    elif not user.terms_accepted and terms_accepted:
-        # Update terms_accepted if user exists but hadn't accepted before
-        user.terms_accepted = True
-        db.flush()
-
-        db.add(UserVerification(
-            user_id=user.id,
-            is_verified=False,
-            verification_method="otp",
-        ))
+    else:
+        if not user.terms_accepted and terms_accepted:
+            user.terms_accepted = True
+        # Always update marketing opt-in to latest preference
+        user.marketing_opt_in = marketing_opt_in
         db.flush()
 
     verification = db.query(UserVerification).filter_by(user_id=user.id).first()

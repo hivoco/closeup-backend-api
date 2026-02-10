@@ -10,5 +10,6 @@ class User(Base):
     phone_hash = Column(String(64), nullable=False, unique=True)
     video_count = Column(Integer, default=0)
     terms_accepted = Column(Boolean, default=False, nullable=False)
+    marketing_opt_in = Column(Boolean, default=False, nullable=False, server_default="0")
     created_at = Column(DateTime, default=get_ist_now, nullable=False)
     updated_at = Column(DateTime, default=get_ist_now, onupdate=get_ist_now, nullable=False)

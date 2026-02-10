@@ -59,6 +59,7 @@ class VideoJobDetailResponse(VideoJobResponse):
     lipsync_seg4_url: Optional[str] = None
     final_video_url: Optional[str] = None
     terms_accepted: Optional[bool] = None
+    marketing_opt_in: Optional[bool] = None
     video_count: Optional[int] = None
 
     class Config:
@@ -265,9 +266,11 @@ def get_video_job(
     user = db.query(User).filter(User.id == job.user_id).first()
     mobile_number = None
     terms_accepted = None
+    marketing_opt_in = None
     video_count = None
     if user:
         terms_accepted = user.terms_accepted
+        marketing_opt_in = user.marketing_opt_in
         video_count = user.video_count
         if user.phone_encrypted:
             try:
@@ -302,6 +305,7 @@ def get_video_job(
         "lipsync_seg4_url": assets.lipsync_seg4_url if assets else None,
         "final_video_url": assets.final_video_url if assets else None,
         "terms_accepted": terms_accepted,
+        "marketing_opt_in": marketing_opt_in,
         "video_count": video_count,
     }
 
