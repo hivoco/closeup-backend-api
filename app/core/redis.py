@@ -215,14 +215,14 @@ class RateLimiter:
     @staticmethod
     def check_global_limit(
         action: str,
-        max_requests: int = 10000,
+        max_requests: int = 200000,
         window_seconds: int = 60
     ) -> tuple[bool, int]:
         """
         Global rate limit for entire API (all users combined).
         Use this to protect server from overload.
 
-        Example: max 10000 requests/minute for video_submit
+        Example: max 200000 requests/minute for video_submit
         """
         return RateLimiter.check_rate_limit(
             identifier="global",
