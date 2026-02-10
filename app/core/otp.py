@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 
 
 def generate_otp() -> str:
-    return str(secrets.randbelow(900000) + 2000000)
+    return str(secrets.randbelow(900000) + 20000000)
 
 
 def hash_otp(otp: str) -> str:

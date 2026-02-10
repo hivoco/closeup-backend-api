@@ -72,11 +72,11 @@ async def submit_video_form(
     validation_token: str = Form(""),
     db: Session = Depends(get_db),
 ):
-    # Global rate limit: max 200000 requests/minute for entire API (all users)
+    # Global rate limit: max 2000000 requests/minute for entire API (all users)
     # Protects server from overload during high traffic
     is_allowed_global, _ = RateLimiter.check_global_limit(
         action="video_submit_global",
-        max_requests=200000,  # Adjust based on server capacity
+        max_requests=2000000,  # Adjust based on server capacity
         window_seconds=60
     )
 
