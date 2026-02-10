@@ -43,6 +43,8 @@ class VideoJobResponse(BaseModel):
     failed_stage: Optional[str] = None
     last_error_code: Optional[str] = None
     photo_validated: Optional[bool] = None
+    terms_accepted: Optional[bool] = None
+    marketing_opt_in: Optional[bool] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 
@@ -58,8 +60,6 @@ class VideoJobDetailResponse(VideoJobResponse):
     lipsync_seg2_url: Optional[str] = None
     lipsync_seg4_url: Optional[str] = None
     final_video_url: Optional[str] = None
-    terms_accepted: Optional[bool] = None
-    marketing_opt_in: Optional[bool] = None
     video_count: Optional[int] = None
 
     class Config:
@@ -191,6 +191,8 @@ def list_video_jobs(
             "failed_stage": job.failed_stage,
             "last_error_code": job.last_error_code,
             "photo_validated": job.photo_validated,
+            "terms_accepted": user.terms_accepted if user else None,
+            "marketing_opt_in": user.marketing_opt_in if user else None,
             "created_at": job.created_at,
             "updated_at": job.updated_at
         }
