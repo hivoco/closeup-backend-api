@@ -27,3 +27,4 @@ htmlcov/
 whatsapp.py
 test_redis_connection.py
 duplicate.py
+check_numbers.py

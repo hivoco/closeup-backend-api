@@ -395,7 +395,7 @@ def update_job_status(
         )
 
     # Validate status
-    valid_statuses = ['wait', 'unverified_photo', 'queued', 'photo_processing', 'photo_done', 'lipsync_processing',
+    valid_statuses = ['wait', 'unverified_photo', 'client', 'queued', 'photo_processing', 'photo_done', 'lipsync_processing',
                       'lipsync_done', 'stitching', 'uploaded', 'sent', 'failed']
 
     if status not in valid_statuses:
@@ -468,7 +468,7 @@ def update_job_by_job_id(
         )
 
     # Validate status
-    valid_statuses = ['wait', 'unverified_photo', 'queued', 'photo_processing', 'photo_done', 'lipsync_processing',
+    valid_statuses = ['wait', 'unverified_photo', 'client', 'queued', 'photo_processing', 'photo_done', 'lipsync_processing',
                       'lipsync_done', 'stitching', 'uploaded', 'sent', 'failed']
 
     if status not in valid_statuses:
@@ -657,6 +657,39 @@ def update_job_fields(
         "success": True,
         "message": f"Job {job_id} updated: {', '.join(updated_fields)}",
         "job": VideoJobResponse(**job_dict)
+    }
+
+
+class UpdateVideoUrlRequest(BaseModel):
+    final_video_url: str
+
+
+@router.patch("/{job_id}/video-url")
+def update_video_url(
+    job_id: int,
+    body: UpdateVideoUrlRequest,
+    db: Session = Depends(get_db),
+    _: str = Depends(get_current_admin)
+):
+    """Update the final_video_url for a video job."""
+    job = db.query(VideoJob).filter(VideoJob.id == job_id).first()
+    if not job:
+        raise HTTPException(status_code=404, detail=f"Video job with ID {job_id} not found")
+
+    assets = db.query(VideoAssets).filter(VideoAssets.job_id == job_id).first()
+    if not assets:
+        assets = VideoAssets(job_id=job_id, final_video_url=body.final_video_url)
+        db.add(assets)
+    else:
+        assets.final_video_url = body.final_video_url
+
+    job.updated_at = get_ist_now()
+    db.commit()
+
+    return {
+        "success": True,
+        "message": f"Final video URL updated for job {job_id}",
+        "final_video_url": body.final_video_url,
     }
 
 

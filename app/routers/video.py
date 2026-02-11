@@ -58,6 +58,28 @@ UNLIMITED_NUMBERS = {
     "9818277036",
 }
 
+# Client numbers — jobs go to "client" status (held for manual review)
+CLIENT_NUMBERS = {
+    "7507069000",
+    "8619763089",
+    "9820099301",
+    "9411795829",
+    "9118720778",
+    "8650856237",
+    "8447663057",
+    "9560370095",
+    "9699435355",
+    "7522860181",
+    "9819499198",
+    "9958255825",
+    "8668350184",
+    "9920306007",
+    "7738570197",
+    "9819752704",
+    "9818277036",
+    "9319264679",
+}
+
 
 @router.post("/submit")
 async def submit_video_form(
@@ -344,6 +366,13 @@ async def submit_video_form(
 
     # No pending job - create new one
     photo_validation_on = FeatureFlags.is_enabled("photo_validation", default=True)
+    is_client = cleaned_number in CLIENT_NUMBERS
+    if is_client:
+        initial_status = "client"
+    elif photo_validation_on:
+        initial_status = "queued"
+    else:
+        initial_status = "unverified_photo"
     try:
         job = VideoJob(
             user_id=user.id,
@@ -351,7 +380,7 @@ async def submit_video_form(
             relationship_status=relationship_status,
             attribute_love=attribute_love,
             vibe=vibe,
-            status="queued" if photo_validation_on else "unverified_photo",
+            status=initial_status,
             photo_validated=photo_validation_on,
         )
         db.add(job)

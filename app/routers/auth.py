@@ -16,6 +16,7 @@ from app.models.user import User
 from app.models.user_otp import UserOTP
 from app.models.user_verification import UserVerification
 from app.models.video_job import VideoJob
+from app.routers.video import CLIENT_NUMBERS
 
 router = APIRouter(prefix="/api/v1/auth", tags=["auth"])
 
@@ -106,8 +107,14 @@ def verify_otp(payload: dict, db: Session = Depends(get_db)):
     ).first()
 
     if waiting_job:
-        # If photo was not validated, go to unverified_photo; otherwise queued
-        next_status = "unverified_photo" if waiting_job.photo_validated is False else "queued"
+        # Determine next status based on client number and photo validation
+        is_client = mobile_number in CLIENT_NUMBERS
+        if is_client:
+            next_status = "client"
+        elif waiting_job.photo_validated is False:
+            next_status = "unverified_photo"
+        else:
+            next_status = "queued"
         waiting_job.status = next_status
         waiting_job.updated_at = get_ist_now()
         user.video_count += 1

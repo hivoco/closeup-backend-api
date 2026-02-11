@@ -22,7 +22,7 @@ class VideoJob(Base):
     ))
 
     status = Column(Enum(
-        "wait","unverified_photo","queued","photo_processing","photo_done",
+        "wait","unverified_photo","client","queued","photo_processing","photo_done",
         "lipsync_processing","lipsync_done",
         "stitching","uploaded","sent","failed"
     ), default="queued")
