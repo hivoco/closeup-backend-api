@@ -33,5 +33,8 @@ class VideoJob(Base):
     failed_stage = Column(Enum("photo","lipsync","stitch","delivery"), nullable=True)
     last_error_code = Column(String(64), nullable=True)
     photo_validated = Column(Boolean, default=True, nullable=False, server_default="1")
+    utm_source = Column(String(128), nullable=True)
+    utm_medium = Column(String(128), nullable=True)
+    utm_campaign = Column(String(128), nullable=True)
     created_at = Column(DateTime, default=get_ist_now, nullable=False)
     updated_at = Column(DateTime, default=get_ist_now, onupdate=get_ist_now, nullable=False)

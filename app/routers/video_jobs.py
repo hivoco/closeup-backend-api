@@ -45,6 +45,9 @@ class VideoJobResponse(BaseModel):
     photo_validated: Optional[bool] = None
     terms_accepted: Optional[bool] = None
     marketing_opt_in: Optional[bool] = None
+    utm_source: Optional[str] = None
+    utm_medium: Optional[str] = None
+    utm_campaign: Optional[str] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 
@@ -197,6 +200,9 @@ def list_video_jobs(
             "photo_validated": job.photo_validated,
             "terms_accepted": user.terms_accepted if user else None,
             "marketing_opt_in": user.marketing_opt_in if user else None,
+            "utm_source": job.utm_source,
+            "utm_medium": job.utm_medium,
+            "utm_campaign": job.utm_campaign,
             "created_at": job.created_at,
             "updated_at": job.updated_at
         }
@@ -307,6 +313,9 @@ def get_video_job(
         "failed_stage": job.failed_stage,
         "last_error_code": job.last_error_code,
         "photo_validated": job.photo_validated,
+        "utm_source": job.utm_source,
+        "utm_medium": job.utm_medium,
+        "utm_campaign": job.utm_campaign,
         "created_at": job.created_at,
         "updated_at": job.updated_at,
         "raw_selfie_url": assets.raw_selfie_url if assets else None,
@@ -936,6 +945,86 @@ def get_reports(
             vibe=vibe_dict
         )
     )
+
+
+@router.get("/reports/traffic-sources")
+def get_traffic_sources(
+    start_date: Optional[date] = Query(None, description="Start date (YYYY-MM-DD)"),
+    end_date: Optional[date] = Query(None, description="End date (YYYY-MM-DD)"),
+    db: Session = Depends(get_db),
+    _: str = Depends(get_current_admin)
+):
+    """
+    Get traffic source breakdown grouped by utm_source, utm_medium, utm_campaign.
+    Includes per-source conversion data (total submissions vs completed videos).
+    """
+    from sqlalchemy import func, case
+
+    filters = []
+    if start_date:
+        filters.append(VideoJob.created_at >= datetime.combine(start_date, datetime.min.time()))
+    if end_date:
+        filters.append(VideoJob.created_at <= datetime.combine(end_date, datetime.max.time()))
+
+    # utm_source with conversion breakdown
+    source_query = db.query(
+        VideoJob.utm_source,
+        func.count(VideoJob.id).label('total'),
+        func.sum(case((VideoJob.status == "sent", 1), else_=0)).label('sent'),
+        func.sum(case((VideoJob.status == "failed", 1), else_=0)).label('failed'),
+    )
+    if filters:
+        source_query = source_query.filter(and_(*filters))
+    source_rows = source_query.group_by(VideoJob.utm_source).all()
+
+    source_detail = []
+    source_simple = {}
+    for row in source_rows:
+        name = row.utm_source or "direct"
+        total = row.total or 0
+        sent = int(row.sent or 0)
+        failed = int(row.failed or 0)
+        source_simple[name] = total
+        source_detail.append({
+            "source": name,
+            "total": total,
+            "sent": sent,
+            "failed": failed,
+            "in_progress": total - sent - failed,
+            "conversion_rate": round((sent / total) * 100, 1) if total > 0 else 0,
+        })
+    source_detail.sort(key=lambda x: x["total"], reverse=True)
+
+    # utm_medium counts
+    medium_query = db.query(
+        VideoJob.utm_medium,
+        func.count(VideoJob.id).label('count')
+    )
+    if filters:
+        medium_query = medium_query.filter(and_(*filters))
+    medium_counts = medium_query.group_by(VideoJob.utm_medium).all()
+    medium_dict = {m or "none": c for m, c in medium_counts}
+
+    # utm_campaign counts
+    campaign_query = db.query(
+        VideoJob.utm_campaign,
+        func.count(VideoJob.id).label('count')
+    )
+    if filters:
+        campaign_query = campaign_query.filter(and_(*filters))
+    campaign_counts = campaign_query.group_by(VideoJob.utm_campaign).all()
+    campaign_dict = {cp or "none": c for cp, c in campaign_counts}
+
+    return {
+        "utm_source": source_simple,
+        "utm_medium": medium_dict,
+        "utm_campaign": campaign_dict,
+        "source_detail": source_detail,
+        "date_range": {
+            "start_date": str(start_date) if start_date else None,
+            "end_date": str(end_date) if end_date else None,
+        }
+    }
 
 
 class TrendDataPoint(BaseModel):
