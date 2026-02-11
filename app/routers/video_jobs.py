@@ -84,6 +84,7 @@ def list_video_jobs(
     page_size: int = Query(20, ge=1, le=100, description="Number of items per page (max 100)"),
     status: Optional[str] = Query(None, description="Filter by status: queued, photo_processing, photo_done, lipsync_processing, lipsync_done, stitching, uploaded, sent, failed"),
     failed_stage: Optional[str] = Query(None, description="Filter by failed stage: photo, lipsync, stitch, delivery"),
+    vibe: Optional[str] = Query(None, description="Filter by vibe: romantic, rock, rap"),
     start_date: Optional[date] = Query(None, description="Filter from date (YYYY-MM-DD)"),
     end_date: Optional[date] = Query(None, description="Filter to date (YYYY-MM-DD)"),
     user_id: Optional[str] = Query(None, description="Filter by user ID"),
@@ -117,6 +118,9 @@ def list_video_jobs(
 
     if failed_stage:
         filters.append(VideoJob.failed_stage == failed_stage)
+
+    if vibe:
+        filters.append(VideoJob.vibe == vibe)
 
     # If mobile_number provided, find user by phone hash and filter by user_id
     if mobile_number:
@@ -209,6 +213,10 @@ def list_video_jobs(
     if failed_stage:
         filters_applied["failed_stage"] = failed_stage
         filter_parts.append(f"failed_stage='{failed_stage}'")
+
+    if vibe:
+        filters_applied["vibe"] = vibe
+        filter_parts.append(f"vibe='{vibe}'")
 
     if mobile_number:
         filters_applied["mobile_number"] = mobile_number
